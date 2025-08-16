@@ -83,4 +83,4 @@ $ python3 create_batches.py
 ```
 
 ## Change Log
-- 15 Aug 2025: Version 1.0 released.
+- 16 Aug 2025: Version 1.0 released.

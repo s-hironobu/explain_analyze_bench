@@ -322,7 +322,7 @@ case "$1" in
 	if ./bin/psql -l >/dev/null 2>&1; then
 	    echo "==========================================="
 	    echo "Error: Other PostgreSQL is already running."
-	    echo "       Stop the server and try setup again."
+	    echo "       Stop the server and try benchmark again."
 	    echo "==========================================="
 	    exit 1
 	fi
