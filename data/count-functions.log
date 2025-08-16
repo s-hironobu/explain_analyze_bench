@@ -1,0 +1,148 @@
+================ Step 0 =====================
+
+==== test3 => 45000
+
+$ ./bin/psql testdb
+psql (19devel)
+Type "help" for help.
+
+testdb=# \d
+        List of relations
+ Schema | Name  | Type  | Owner  
+--------+-------+-------+--------
+ public | test1 | table | ubuntu
+ public | test2 | table | ubuntu
+ public | test3 | table | ubuntu
+(3 rows)
+
+testdb=# select count(*) from test3;
+ count 
+-------
+ 45000
+(1 row)
+
+testdb=# select pg_backend_pid();
+ pg_backend_pid 
+----------------
+        3987203
+(1 row)
+
+testdb=# 
+testdb=# EXPLAIN (ANALYZE TRUE, TIMING FALSE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a,test2 AS b, test3 AS c WHERE a.id = c.id;
+                                                                   QUERY PLAN                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=35422030.39..35422030.40 rows=1 width=8) (actual rows=1.00 loops=1)
+   ->  Nested Loop  (cost=0.71..29519030.39 rows=2361200000 width=0) (actual rows=2500000000.00 loops=1)
+         ->  Seq Scan on test2 b  (cost=0.00..722.00 rows=50000 width=0) (actual rows=50000.00 loops=1)
+         ->  Materialize  (cost=0.71..3426.45 rows=47224 width=0) (actual rows=50000.00 loops=50000)
+               Storage: Memory  Maximum Storage: 1684kB
+               ->  Merge Join  (cost=0.71..3190.33 rows=47224 width=0) (actual rows=50000.00 loops=1)
+                     Merge Cond: (a.id = c.id)
+                     ->  Index Only Scan using test1_id_idx on test1 a  (cost=0.42..4037.42 rows=155000 width=4) (actual rows=50001.00 loops=1)
+                           Heap Fetches: 0
+                           Index Searches: 1
+                     ->  Index Only Scan using test3_pkey on test3 c  (cost=0.29..1175.29 rows=45000 width=4) (actual rows=45000.00 loops=1)
+                           Heap Fetches: 0
+                           Index Searches: 1
+ Planning Time: 5.895 ms
+ Execution Time: 127200.005 ms
+(15 rows)
+
+
+$ kill -USR2  3987203
+ubuntu@ubuntu24:~/tmp/pgsql$ cat data/log/postgresql-2025-08-11_080935.log 
+2025-08-11 08:09:35.667 JST [3987144] LOG:  starting PostgreSQL 19devel on aarch64-unknown-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0, 64-bit
+2025-08-11 08:09:35.667 JST [3987144] LOG:  listening on IPv6 address "::1", port 5432
+2025-08-11 08:09:35.667 JST [3987144] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2025-08-11 08:09:35.671 JST [3987144] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5432"
+2025-08-11 08:09:35.678 JST [3987151] LOG:  database system was shut down at 2025-08-11 07:27:32 JST
+2025-08-11 08:09:35.682 JST [3987144] LOG:  database system is ready to accept connections
+=====================
+ExecInterpExpr: 45438
+ExecProcNodeInstr: 0
+InstrStartNode: 0
+InstrStopNode: 0
+InstrEndLoop: 0
+=====================
+ExecInterpExpr: 0
+ExecProcNodeInstr: 0
+InstrStartNode: 0
+InstrStopNode: 0
+InstrEndLoop: 0
+2025-08-11 08:14:35.779 JST [3987149] LOG:  checkpoint starting: time
+=====================
+ExecInterpExpr: 5000050001
+ExecProcNodeInstr: 5000245007
+InstrStartNode: 5000245014
+InstrStopNode: 5000245014
+InstrEndLoop: 50007
+
+==== test3 => 35000
+
+=====================
+ExecInterpExpr: 0
+ExecProcNodeInstr: 0
+InstrStartNode: 0
+InstrStopNode: 0
+InstrEndLoop: 0
+=====================
+ExecInterpExpr: 4000040001
+ExecProcNodeInstr: 4000215007
+InstrStartNode: 4000215014
+InstrStopNode: 4000215014
+InstrEndLoop: 50007
+
+
+
+================ Step 2 =====================
+
+==== test3 => 45000
+
+$ cat data/log/postgresql-2025-08-11_083617.log 
+2025-08-11 08:36:17.226 JST [3999045] LOG:  starting PostgreSQL 19devel on aarch64-unknown-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0, 64-bit
+2025-08-11 08:36:17.229 JST [3999045] LOG:  listening on IPv6 address "::1", port 5432
+2025-08-11 08:36:17.229 JST [3999045] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2025-08-11 08:36:17.232 JST [3999045] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5432"
+2025-08-11 08:36:17.245 JST [3999052] LOG:  database system was shut down at 2025-08-11 08:25:27 JST
+2025-08-11 08:36:17.257 JST [3999045] LOG:  database system is ready to accept connections
+=====================
+ExecInterpExpr: 45002
+ExecProcNodeInstr: 0
+ExecProcNodeInstrLite: 0
+InstrStartNode: 0
+InstrStopNode: 0
+InstrEndLoop: 0
+=====================
+ExecInterpExpr: 0
+ExecProcNodeInstr: 0
+ExecProcNodeInstrLite: 0
+InstrStartNode: 0
+InstrStopNode: 0
+InstrEndLoop: 0
+=====================
+ExecInterpExpr: 5000050001
+ExecProcNodeInstr: 0
+ExecProcNodeInstrLite: 5000245007
+InstrStartNode: 0
+InstrStopNode: 0
+InstrEndLoop: 0
+
+
+==== test3 => 35000
+
+=====================
+ExecInterpExpr: 0
+ExecProcNodeInstr: 0
+ExecProcNodeInstrLite: 0
+InstrStartNode: 0
+InstrStopNode: 0
+InstrEndLoop: 0
+=====================
+ExecInterpExpr: 4000040001
+ExecProcNodeInstr: 0
+ExecProcNodeInstrLite: 4000215007
+InstrStartNode: 0
+InstrStopNode: 0
+InstrEndLoop: 0
+
+

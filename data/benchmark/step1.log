@@ -1,0 +1,157 @@
+TIMING TRUE
+Timing is on.
+SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 45153.728 ms (00:45.154)
+CHECKPOINT;
+CHECKPOINT
+Time: 3.628 ms
+SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 45458.576 ms (00:45.459)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.369 ms
+EXPLAIN (ANALYZE TRUE, TIMING FALSE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 54827.728 ms (00:54.828)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.845 ms
+EXPLAIN (ANALYZE TRUE, TIMING TRUE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 157838.257 ms (02:37.838)
+CHECKPOINT;
+CHECKPOINT
+Time: 3.289 ms
+SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 45453.110 ms (00:45.453)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.785 ms
+EXPLAIN (ANALYZE TRUE, TIMING FALSE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 54876.155 ms (00:54.876)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.107 ms
+EXPLAIN (ANALYZE TRUE, TIMING TRUE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 158873.078 ms (02:38.873)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.689 ms
+SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 45548.420 ms (00:45.548)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.676 ms
+EXPLAIN (ANALYZE TRUE, TIMING FALSE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 54770.204 ms (00:54.770)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.072 ms
+EXPLAIN (ANALYZE TRUE, TIMING TRUE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 157340.395 ms (02:37.340)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.539 ms
+SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 45177.941 ms (00:45.178)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.583 ms
+EXPLAIN (ANALYZE TRUE, TIMING FALSE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 54631.433 ms (00:54.631)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.169 ms
+EXPLAIN (ANALYZE TRUE, TIMING TRUE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 157991.791 ms (02:37.992)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.726 ms
+SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 45405.335 ms (00:45.405)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.677 ms
+EXPLAIN (ANALYZE TRUE, TIMING FALSE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 54896.295 ms (00:54.896)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.024 ms
+EXPLAIN (ANALYZE TRUE, TIMING TRUE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 157885.309 ms (02:37.885)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.726 ms
+SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 45379.003 ms (00:45.379)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.706 ms
+EXPLAIN (ANALYZE TRUE, TIMING FALSE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 54724.845 ms (00:54.725)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.135 ms
+EXPLAIN (ANALYZE TRUE, TIMING TRUE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 157135.243 ms (02:37.135)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.575 ms
+SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 45435.301 ms (00:45.435)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.558 ms
+EXPLAIN (ANALYZE TRUE, TIMING FALSE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 54843.909 ms (00:54.844)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.051 ms
+EXPLAIN (ANALYZE TRUE, TIMING TRUE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 158187.784 ms (02:38.188)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.320 ms
+SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 45633.939 ms (00:45.634)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.566 ms
+EXPLAIN (ANALYZE TRUE, TIMING FALSE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 54882.505 ms (00:54.883)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.080 ms
+EXPLAIN (ANALYZE TRUE, TIMING TRUE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 158365.649 ms (02:38.366)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.458 ms
+SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 45605.559 ms (00:45.606)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.518 ms
+EXPLAIN (ANALYZE TRUE, TIMING FALSE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 55175.088 ms (00:55.175)
+CHECKPOINT;
+CHECKPOINT
+Time: 0.981 ms
+EXPLAIN (ANALYZE TRUE, TIMING TRUE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 158859.127 ms (02:38.859)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.516 ms
+SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 45992.468 ms (00:45.992)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.235 ms
+EXPLAIN (ANALYZE TRUE, TIMING FALSE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 55151.955 ms (00:55.152)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.006 ms
+EXPLAIN (ANALYZE TRUE, TIMING TRUE, BUFFERS FALSE) SELECT count(*) FROM test1 AS a, test2 AS b, test3 AS c WHERE a.id = c.id;
+Time: 158588.986 ms (02:38.589)
+CHECKPOINT;
+CHECKPOINT
+Time: 1.521 ms

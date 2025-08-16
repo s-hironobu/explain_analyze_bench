@@ -1,0 +1,970 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="742" onload="init(evt)" viewBox="0 0 1200 742" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+
+		// use GET parameters to restore a flamegraphs state.
+		var params = get_params();
+		if (params.x && params.y)
+			zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+                if (params.s) search(params.s);
+	}
+
+	// event listeners
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom(true);
+			zoom(target);
+			if (!document.querySelector('.parent')) {
+				// we have basically done a clearzoom so clear the url
+				var params = get_params();
+				if (params.x) delete params.x;
+				if (params.y) delete params.y;
+				history.replaceState(null, null, parse_params(params));
+				unzoombtn.classList.add("hide");
+				return;
+			}
+
+			// set parameters for zoom state
+			var el = target.querySelector("rect");
+			if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+				var params = get_params()
+				params.x = el.attributes._orig_x.value;
+				params.y = el.attributes.y.value;
+				history.replaceState(null, null, parse_params(params));
+			}
+		}
+		else if (e.target.id == "unzoom") clearzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+		else if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function get_params() {
+		var params = {};
+		var paramsarr = window.location.search.substr(1).split('&');
+		for (var i = 0; i < paramsarr.length; ++i) {
+			var tmp = paramsarr[i].split("=");
+			if (!tmp[0] || !tmp[1]) continue;
+			params[tmp[0]]  = decodeURIComponent(tmp[1]);
+		}
+		return params;
+	}
+	function parse_params(params) {
+		var uri = "?";
+		for (var key in params) {
+			uri += key + '=' + encodeURIComponent(params[key]) + '&';
+		}
+		if (uri.slice(-1) == "&")
+			uri = uri.substring(0, uri.length - 1);
+		if (uri == '?')
+			uri = window.location.href.split('?')[0];
+		return uri;
+	}
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		var sl = t.getSubStringLength(0, txt.length);
+		// check if only whitespace or if we can fit the entire string into width w
+		if (/^ *$/.test(txt) || sl < w)
+			return;
+
+		// this isn't perfect, but gives a good starting point
+		// and avoids calling getSubStringLength too often
+		var start = Math.floor((w/sl) * txt.length);
+		for (var x = start; x > 0; x = x-2) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom(dont_update_text) {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			if(!dont_update_text) update_text(el[i]);
+		}
+		search();
+	}
+	function clearzoom() {
+		unzoom();
+
+		// remove zoom state
+		var params = get_params();
+		if (params.x) delete params.x;
+		if (params.y) delete params.y;
+		history.replaceState(null, null, parse_params(params));
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+		var params = get_params();
+		delete params.s;
+		history.replaceState(null, null, parse_params(params));
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) search(term);
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (term) currentSearchTerm = term;
+		if (currentSearchTerm === null) return;
+
+		var re = new RegExp(currentSearchTerm, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+		var params = get_params();
+		params.s = currentSearchTerm;
+		history.replaceState(null, null, parse_params(params));
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="742.0" fill="url(#background)"  />
+<text id="title" x="600.00" y="24" >Flame Graph</text>
+<text id="details" x="10.00" y="725" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1090.00" y="24" >Search</text>
+<text id="ignorecase" x="1174.00" y="24" >ic</text>
+<text id="matched" x="1090.00" y="725" > </text>
+<g id="frames">
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="861.9" y="213" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="864.87" y="223.5" ></text>
+</g>
+<g >
+<title>FillPortalStore (104,676,766,630 samples, 99.99%)</title><rect x="10.1" y="485" width="1179.9" height="15.0" fill="rgb(252,218,52)" rx="2" ry="2" />
+<text  x="13.11" y="495.5" >FillPortalStore</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="165" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="175.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="689.3" y="165" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="692.26" y="175.5" ></text>
+</g>
+<g >
+<title>[unknown] (20,202,020 samples, 0.02%)</title><rect x="379.3" y="261" width="0.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.35" y="271.5" ></text>
+</g>
+<g >
+<title>tuplestore_gettupleslot (888,888,880 samples, 0.85%)</title><rect x="989.7" y="277" width="10.0" height="15.0" fill="rgb(220,69,16)" rx="2" ry="2" />
+<text  x="992.73" y="287.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="904.8" y="149" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="907.79" y="159.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="379.5" y="149" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.46" y="159.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="37" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="47.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="379.5" y="117" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.46" y="127.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="904.8" y="117" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="907.79" y="127.5" ></text>
+</g>
+<g >
+<title>tuplestore_puttuple_common (10,101,010 samples, 0.01%)</title><rect x="904.8" y="245" width="0.1" height="15.0" fill="rgb(209,19,4)" rx="2" ry="2" />
+<text  x="907.79" y="255.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="69" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="79.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="85" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="95.5" ></text>
+</g>
+<g >
+<title>CommitTransactionCommand (10,101,010 samples, 0.01%)</title><rect x="10.0" y="501" width="0.1" height="15.0" fill="rgb(205,4,1)" rx="2" ry="2" />
+<text  x="13.00" y="511.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="861.9" y="133" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="864.87" y="143.5" ></text>
+</g>
+<g >
+<title>ExecNestLoop (1,626,262,610 samples, 1.55%)</title><rect x="459.4" y="325" width="18.3" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="462.39" y="335.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="904.8" y="37" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="907.79" y="47.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="379.5" y="37" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.46" y="47.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="117" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="127.5" ></text>
+</g>
+<g >
+<title>ExecInterpExpr (29,696,969,400 samples, 28.37%)</title><rect x="53.8" y="341" width="334.8" height="15.0" fill="rgb(225,96,22)" rx="2" ry="2" />
+<text  x="56.83" y="351.5" >ExecInterpExpr</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="689.3" y="117" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="692.26" y="127.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="689.3" y="261" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="692.26" y="271.5" ></text>
+</g>
+<g >
+<title>[unknown] (20,202,020 samples, 0.02%)</title><rect x="379.3" y="165" width="0.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.35" y="175.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="261" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="271.5" ></text>
+</g>
+<g >
+<title>ExplainOnePlan (104,676,766,630 samples, 99.99%)</title><rect x="10.1" y="405" width="1179.9" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="13.11" y="415.5" >ExplainOnePlan</text>
+</g>
+<g >
+<title>InstrStartNode (727,272,720 samples, 0.69%)</title><rect x="999.7" y="293" width="8.2" height="15.0" fill="rgb(235,140,33)" rx="2" ry="2" />
+<text  x="1002.75" y="303.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="689.3" y="149" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="692.26" y="159.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="149" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="159.5" ></text>
+</g>
+<g >
+<title>ExecProcNodeInstr (61,272,726,660 samples, 58.53%)</title><rect x="477.7" y="325" width="690.7" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="480.72" y="335.5" >ExecProcNodeInstr</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="904.8" y="85" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="907.79" y="95.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="379.5" y="85" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.46" y="95.5" ></text>
+</g>
+<g >
+<title>tuplestore_gettupleslot (10,414,141,310 samples, 9.95%)</title><rect x="787.4" y="261" width="117.4" height="15.0" fill="rgb(220,69,16)" rx="2" ry="2" />
+<text  x="790.41" y="271.5" >tuplestore_get..</text>
+</g>
+<g >
+<title>int8inc (797,979,790 samples, 0.76%)</title><rect x="379.6" y="325" width="9.0" height="15.0" fill="rgb(235,138,33)" rx="2" ry="2" />
+<text  x="382.58" y="335.5" ></text>
+</g>
+<g >
+<title>PortalRun (104,676,766,630 samples, 99.99%)</title><rect x="10.1" y="501" width="1179.9" height="15.0" fill="rgb(223,85,20)" rx="2" ry="2" />
+<text  x="13.11" y="511.5" >PortalRun</text>
+</g>
+<g >
+<title>ExplainQuery (104,676,766,630 samples, 99.99%)</title><rect x="10.1" y="437" width="1179.9" height="15.0" fill="rgb(206,6,1)" rx="2" ry="2" />
+<text  x="13.11" y="447.5" >ExplainQuery</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="904.8" y="69" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="907.79" y="79.5" ></text>
+</g>
+<g >
+<title>_int_realloc (10,101,010 samples, 0.01%)</title><rect x="904.8" y="197" width="0.1" height="15.0" fill="rgb(230,117,28)" rx="2" ry="2" />
+<text  x="907.79" y="207.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="379.5" y="69" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.46" y="79.5" ></text>
+</g>
+<g >
+<title>_start (104,686,867,640 samples, 100.00%)</title><rect x="10.0" y="661" width="1180.0" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="13.00" y="671.5" >_start</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="861.9" y="229" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="864.87" y="239.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="1189.9" y="293" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="1192.89" y="303.5" ></text>
+</g>
+<g >
+<title>__libc_start_call_main (104,686,867,640 samples, 100.00%)</title><rect x="10.0" y="629" width="1180.0" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="13.00" y="639.5" >__libc_start_call_main</text>
+</g>
+<g >
+<title>[unknown] (20,202,020 samples, 0.02%)</title><rect x="379.3" y="197" width="0.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.35" y="207.5" ></text>
+</g>
+<g >
+<title>InstrStartNode (3,565,656,530 samples, 3.41%)</title><rect x="1050.5" y="309" width="40.2" height="15.0" fill="rgb(235,140,33)" rx="2" ry="2" />
+<text  x="1053.53" y="319.5" >Ins..</text>
+</g>
+<g >
+<title>PortalRunUtility (104,676,766,630 samples, 99.99%)</title><rect x="10.1" y="469" width="1179.9" height="15.0" fill="rgb(239,160,38)" rx="2" ry="2" />
+<text  x="13.11" y="479.5" >PortalRunUtility</text>
+</g>
+<g >
+<title>ExecProcNodeInstr (27,535,353,260 samples, 26.30%)</title><rect x="689.4" y="293" width="310.3" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="692.38" y="303.5" >ExecProcNodeInstr</text>
+</g>
+<g >
+<title>CommitTransactionCommandInternal (10,101,010 samples, 0.01%)</title><rect x="10.0" y="485" width="0.1" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="13.00" y="495.5" ></text>
+</g>
+<g >
+<title>postgres (104,686,867,640 samples, 100.00%)</title><rect x="10.0" y="677" width="1180.0" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="13.00" y="687.5" >postgres</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="1189.9" y="229" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="1192.89" y="239.5" ></text>
+</g>
+<g >
+<title>postmaster_child_launch (104,686,867,640 samples, 100.00%)</title><rect x="10.0" y="565" width="1180.0" height="15.0" fill="rgb(206,5,1)" rx="2" ry="2" />
+<text  x="13.00" y="575.5" >postmaster_child_launch</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="1189.9" y="325" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="1192.89" y="335.5" ></text>
+</g>
+<g >
+<title>[unknown] (20,202,020 samples, 0.02%)</title><rect x="379.3" y="293" width="0.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.35" y="303.5" ></text>
+</g>
+<g >
+<title>ExecNestLoop (48,242,423,760 samples, 46.08%)</title><rect x="506.8" y="309" width="543.7" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="509.75" y="319.5" >ExecNestLoop</text>
+</g>
+<g >
+<title>InstrStartNode (2,757,575,730 samples, 2.63%)</title><rect x="904.9" y="277" width="31.1" height="15.0" fill="rgb(235,140,33)" rx="2" ry="2" />
+<text  x="907.91" y="287.5" >In..</text>
+</g>
+<g >
+<title>realloc (10,101,010 samples, 0.01%)</title><rect x="904.8" y="213" width="0.1" height="15.0" fill="rgb(246,189,45)" rx="2" ry="2" />
+<text  x="907.79" y="223.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="861.9" y="181" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="864.87" y="191.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="197" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="207.5" ></text>
+</g>
+<g >
+<title>ExecProcNodeInstr (104,676,766,630 samples, 99.99%)</title><rect x="10.1" y="373" width="1179.9" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="13.11" y="383.5" >ExecProcNodeInstr</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="689.3" y="197" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="692.26" y="207.5" ></text>
+</g>
+<g >
+<title>MemoryContextReset (1,858,585,840 samples, 1.78%)</title><rect x="388.6" y="341" width="20.9" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="391.57" y="351.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="1189.9" y="309" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="1192.89" y="319.5" ></text>
+</g>
+<g >
+<title>exec_simple_query (104,686,867,640 samples, 100.00%)</title><rect x="10.0" y="517" width="1180.0" height="15.0" fill="rgb(211,29,6)" rx="2" ry="2" />
+<text  x="13.00" y="527.5" >exec_simple_query</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="861.9" y="101" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="864.87" y="111.5" ></text>
+</g>
+<g >
+<title>MemoryContextReset (1,707,070,690 samples, 1.63%)</title><rect x="1017.6" y="293" width="19.3" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="1020.62" y="303.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="1189.9" y="277" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="1192.89" y="287.5" ></text>
+</g>
+<g >
+<title>InstrStopNode (4,767,676,720 samples, 4.55%)</title><rect x="936.0" y="277" width="53.7" height="15.0" fill="rgb(207,10,2)" rx="2" ry="2" />
+<text  x="938.99" y="287.5" >Instr..</text>
+</g>
+<g >
+<title>ExecMaterial (16,010,100,850 samples, 15.29%)</title><rect x="724.4" y="277" width="180.5" height="15.0" fill="rgb(235,141,33)" rx="2" ry="2" />
+<text  x="727.44" y="287.5" >ExecMaterial</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="53" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="63.5" ></text>
+</g>
+<g >
+<title>[unknown] (20,202,020 samples, 0.02%)</title><rect x="379.3" y="245" width="0.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.35" y="255.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="1189.9" y="245" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="1192.89" y="255.5" ></text>
+</g>
+<g >
+<title>ServerLoop.isra.0 (104,686,867,640 samples, 100.00%)</title><rect x="10.0" y="581" width="1180.0" height="15.0" fill="rgb(250,207,49)" rx="2" ry="2" />
+<text  x="13.00" y="591.5" >ServerLoop.isra.0</text>
+</g>
+<g >
+<title>ExecStoreMinimalTuple (4,393,939,350 samples, 4.20%)</title><rect x="812.5" y="245" width="49.5" height="15.0" fill="rgb(244,180,43)" rx="2" ry="2" />
+<text  x="815.45" y="255.5" >Exec..</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="689.3" y="181" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="692.26" y="191.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="861.9" y="197" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="864.87" y="207.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="181" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="191.5" ></text>
+</g>
+<g >
+<title>[unknown] (20,202,020 samples, 0.02%)</title><rect x="379.3" y="229" width="0.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.35" y="239.5" ></text>
+</g>
+<g >
+<title>fetch_input_tuple (69,242,423,550 samples, 66.14%)</title><rect x="409.5" y="341" width="780.5" height="15.0" fill="rgb(217,58,14)" rx="2" ry="2" />
+<text  x="412.52" y="351.5" >fetch_input_tuple</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="689.3" y="277" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="692.26" y="287.5" ></text>
+</g>
+<g >
+<title>[unknown] (20,202,020 samples, 0.02%)</title><rect x="379.3" y="325" width="0.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.35" y="335.5" ></text>
+</g>
+<g >
+<title>tuplestore_gettuple (3,797,979,760 samples, 3.63%)</title><rect x="862.0" y="245" width="42.8" height="15.0" fill="rgb(226,101,24)" rx="2" ry="2" />
+<text  x="864.98" y="255.5" >tupl..</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="101" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="111.5" ></text>
+</g>
+<g >
+<title>tts_virtual_clear (1,212,121,200 samples, 1.16%)</title><rect x="1036.9" y="293" width="13.6" height="15.0" fill="rgb(235,140,33)" rx="2" ry="2" />
+<text  x="1039.86" y="303.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="1189.9" y="197" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="1192.89" y="207.5" ></text>
+</g>
+<g >
+<title>tuplestore_puttupleslot (10,101,010 samples, 0.01%)</title><rect x="904.8" y="261" width="0.1" height="15.0" fill="rgb(208,16,3)" rx="2" ry="2" />
+<text  x="907.79" y="271.5" ></text>
+</g>
+<g >
+<title>[unknown] (20,202,020 samples, 0.02%)</title><rect x="379.3" y="181" width="0.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.35" y="191.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="1189.9" y="261" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="1192.89" y="271.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="229" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="239.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="689.3" y="229" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="692.26" y="239.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="904.8" y="53" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="907.79" y="63.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="379.5" y="53" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.46" y="63.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="245" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="255.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="689.3" y="245" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="692.26" y="255.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="904.8" y="101" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="907.79" y="111.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="379.5" y="101" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.46" y="111.5" ></text>
+</g>
+<g >
+<title>[unknown] (20,202,020 samples, 0.02%)</title><rect x="379.3" y="309" width="0.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.35" y="319.5" ></text>
+</g>
+<g >
+<title>[unknown] (20,202,020 samples, 0.02%)</title><rect x="379.3" y="277" width="0.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.35" y="287.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="861.9" y="117" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="864.87" y="127.5" ></text>
+</g>
+<g >
+<title>InstrStartNode (828,282,820 samples, 0.79%)</title><rect x="1168.4" y="325" width="9.3" height="15.0" fill="rgb(235,140,33)" rx="2" ry="2" />
+<text  x="1171.37" y="335.5" ></text>
+</g>
+<g >
+<title>ExecInterpExpr (6,070,707,010 samples, 5.80%)</title><rect x="620.9" y="293" width="68.5" height="15.0" fill="rgb(225,96,22)" rx="2" ry="2" />
+<text  x="623.95" y="303.5" >ExecInt..</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="1189.9" y="213" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="1192.89" y="223.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="861.9" y="149" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="864.87" y="159.5" ></text>
+</g>
+<g >
+<title>InstrStopNode (1,080,808,070 samples, 1.03%)</title><rect x="1177.7" y="325" width="12.2" height="15.0" fill="rgb(207,10,2)" rx="2" ry="2" />
+<text  x="1180.70" y="335.5" ></text>
+</g>
+<g >
+<title>tuplestore_gettuple (606,060,600 samples, 0.58%)</title><rect x="780.6" y="261" width="6.8" height="15.0" fill="rgb(226,101,24)" rx="2" ry="2" />
+<text  x="783.58" y="271.5" ></text>
+</g>
+<g >
+<title>[unknown] (20,202,020 samples, 0.02%)</title><rect x="379.3" y="213" width="0.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.35" y="223.5" ></text>
+</g>
+<g >
+<title>PostgresMain (104,686,867,640 samples, 100.00%)</title><rect x="10.0" y="533" width="1180.0" height="15.0" fill="rgb(227,103,24)" rx="2" ry="2" />
+<text  x="13.00" y="543.5" >PostgresMain</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="379.5" y="133" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="382.46" y="143.5" ></text>
+</g>
+<g >
+<title>PostmasterMain (104,686,867,640 samples, 100.00%)</title><rect x="10.0" y="597" width="1180.0" height="15.0" fill="rgb(212,35,8)" rx="2" ry="2" />
+<text  x="13.00" y="607.5" >PostmasterMain</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="904.8" y="133" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="907.79" y="143.5" ></text>
+</g>
+<g >
+<title>InstrStopNode (6,888,888,820 samples, 6.58%)</title><rect x="1090.7" y="309" width="77.7" height="15.0" fill="rgb(207,10,2)" rx="2" ry="2" />
+<text  x="1093.72" y="319.5" >InstrSto..</text>
+</g>
+<g >
+<title>check_log_connections (104,686,867,640 samples, 100.00%)</title><rect x="10.0" y="549" width="1180.0" height="15.0" fill="rgb(243,177,42)" rx="2" ry="2" />
+<text  x="13.00" y="559.5" >check_log_connections</text>
+</g>
+<g >
+<title>__libc_start_main@@GLIBC_2.34 (104,686,867,640 samples, 100.00%)</title><rect x="10.0" y="645" width="1180.0" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="13.00" y="655.5" >__libc_start_main@@GLIBC_2.34</text>
+</g>
+<g >
+<title>tuplestore_ateof (111,111,110 samples, 0.11%)</title><rect x="779.3" y="261" width="1.3" height="15.0" fill="rgb(218,62,14)" rx="2" ry="2" />
+<text  x="782.32" y="271.5" ></text>
+</g>
+<g >
+<title>ExecAgg (104,676,766,630 samples, 99.99%)</title><rect x="10.1" y="357" width="1179.9" height="15.0" fill="rgb(250,207,49)" rx="2" ry="2" />
+<text  x="13.11" y="367.5" >ExecAgg</text>
+</g>
+<g >
+<title>AllocSetRealloc (10,101,010 samples, 0.01%)</title><rect x="904.8" y="229" width="0.1" height="15.0" fill="rgb(243,175,41)" rx="2" ry="2" />
+<text  x="907.79" y="239.5" ></text>
+</g>
+<g >
+<title>main (104,686,867,640 samples, 100.00%)</title><rect x="10.0" y="613" width="1180.0" height="15.0" fill="rgb(243,179,42)" rx="2" ry="2" />
+<text  x="13.00" y="623.5" >main</text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="689.3" y="213" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="692.26" y="223.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="861.9" y="165" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="864.87" y="175.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="213" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="223.5" ></text>
+</g>
+<g >
+<title>all (104,686,867,640 samples, 100%)</title><rect x="10.0" y="693" width="1180.0" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="13.00" y="703.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="1189.9" y="181" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="1192.89" y="191.5" ></text>
+</g>
+<g >
+<title>sysmalloc (10,101,010 samples, 0.01%)</title><rect x="904.8" y="165" width="0.1" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="907.79" y="175.5" ></text>
+</g>
+<g >
+<title>standard_ExplainOneQuery (104,676,766,630 samples, 99.99%)</title><rect x="10.1" y="421" width="1179.9" height="15.0" fill="rgb(234,137,32)" rx="2" ry="2" />
+<text  x="13.11" y="431.5" >standard_ExplainOneQuery</text>
+</g>
+<g >
+<title>standard_ExecutorRun (104,676,766,630 samples, 99.99%)</title><rect x="10.1" y="389" width="1179.9" height="15.0" fill="rgb(247,196,47)" rx="2" ry="2" />
+<text  x="13.11" y="399.5" >standard_ExecutorRun</text>
+</g>
+<g >
+<title>_int_malloc (10,101,010 samples, 0.01%)</title><rect x="904.8" y="181" width="0.1" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="907.79" y="191.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="861.9" y="69" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="864.87" y="79.5" ></text>
+</g>
+<g >
+<title>standard_ProcessUtility (104,676,766,630 samples, 99.99%)</title><rect x="10.1" y="453" width="1179.9" height="15.0" fill="rgb(233,132,31)" rx="2" ry="2" />
+<text  x="13.11" y="463.5" >standard_ProcessUtility</text>
+</g>
+<g >
+<title>AtEOXact_Enum (10,101,010 samples, 0.01%)</title><rect x="10.0" y="453" width="0.1" height="15.0" fill="rgb(224,88,21)" rx="2" ry="2" />
+<text  x="13.00" y="463.5" ></text>
+</g>
+<g >
+<title>CommitTransaction (10,101,010 samples, 0.01%)</title><rect x="10.0" y="469" width="0.1" height="15.0" fill="rgb(247,194,46)" rx="2" ry="2" />
+<text  x="13.00" y="479.5" ></text>
+</g>
+<g >
+<title>InstrStopNode (858,585,850 samples, 0.82%)</title><rect x="1007.9" y="293" width="9.7" height="15.0" fill="rgb(207,10,2)" rx="2" ry="2" />
+<text  x="1010.94" y="303.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="1189.9" y="165" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="1192.89" y="175.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="989.6" y="133" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="992.61" y="143.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="861.9" y="85" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="864.87" y="95.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.01%)</title><rect x="689.3" y="133" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="692.26" y="143.5" ></text>
+</g>
+</g>
+</svg>

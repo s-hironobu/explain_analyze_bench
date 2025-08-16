@@ -1,0 +1,154 @@
+diff --git a/src/backend/executor/execExprInterp.c b/src/backend/executor/execExprInterp.c
+index 1a37737d4a2..a85ae954044 100644
+--- a/src/backend/executor/execExprInterp.c
++++ b/src/backend/executor/execExprInterp.c
+@@ -79,6 +79,7 @@
+ #include "utils/timestamp.h"
+ #include "utils/typcache.h"
+ #include "utils/xml.h"
++#include "miscadmin.h"
+ 
+ /*
+  * Use computed-goto-based opcode dispatch when computed gotos are available.
+@@ -467,6 +468,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
+ 	TupleTableSlot *oldslot;
+ 	TupleTableSlot *newslot;
+ 
++	__atomic_fetch_add(&ExecInterpExpr_calls, 1, __ATOMIC_RELAXED);
+ 	/*
+ 	 * This array has to be in the same order as enum ExprEvalOp.
+ 	 */
+diff --git a/src/backend/executor/execProcnode.c b/src/backend/executor/execProcnode.c
+index 58f46cc3960..0f9b6c432be 100644
+--- a/src/backend/executor/execProcnode.c
++++ b/src/backend/executor/execProcnode.c
+@@ -493,6 +493,7 @@ static TupleTableSlot *
+ ExecProcNodeInstr(PlanState *node)
+ {
+ 	TupleTableSlot *result;
++	__atomic_fetch_add(&ExecProcNodeInstr_calls, 1, __ATOMIC_RELAXED);
+ 
+ 	InstrStartNode(node->instrument);
+ 
+@@ -516,6 +517,7 @@ static TupleTableSlot *
+ ExecProcNodeInstrLite(PlanState *node)
+ {
+ 	TupleTableSlot *result;
++	__atomic_fetch_add(&ExecProcNodeInstrLite_calls, 1, __ATOMIC_RELAXED);
+ 
+ 	result = node->ExecProcNodeReal(node);
+ 
+diff --git a/src/backend/executor/instrument.c b/src/backend/executor/instrument.c
+index 0896b890bc3..ecd2482d9b8 100644
+--- a/src/backend/executor/instrument.c
++++ b/src/backend/executor/instrument.c
+@@ -16,6 +16,7 @@
+ #include <unistd.h>
+ 
+ #include "executor/instrument.h"
++#include "miscadmin.h"
+ 
+ BufferUsage pgBufferUsage;
+ static BufferUsage save_pgBufferUsage;
+diff --git a/src/backend/main/main.c b/src/backend/main/main.c
+index bdcb5e4f261..632cfe80b16 100644
+--- a/src/backend/main/main.c
++++ b/src/backend/main/main.c
+@@ -63,7 +63,6 @@ static void init_locale(const char *categoryname, int category, const char *loca
+ static void help(const char *progname);
+ static void check_root(const char *progname);
+ 
+-
+ /*
+  * Any Postgres server process begins execution here.
+  */
+diff --git a/src/backend/tcop/postgres.c b/src/backend/tcop/postgres.c
+index a297606cdd7..ed92d9fda85 100644
+--- a/src/backend/tcop/postgres.c
++++ b/src/backend/tcop/postgres.c
+@@ -186,6 +186,36 @@ static void log_disconnections(int code, Datum arg);
+ static void enable_statement_timeout(void);
+ static void disable_statement_timeout(void);
+ 
++/*
++ *
++ */
++static void print_function_counts(int sig);
++
++static void
++print_function_counts(int sig)
++{
++	long long start_count = __atomic_load_n(&InstrStartNode_calls, __ATOMIC_RELAXED);
++	long long stop_count = __atomic_load_n(&InstrStopNode_calls, __ATOMIC_RELAXED);
++	long long loop_count = __atomic_load_n(&InstrEndLoop_calls, __ATOMIC_RELAXED);
++	long long instr_count = __atomic_load_n(&ExecProcNodeInstr_calls, __ATOMIC_RELAXED);
++	long long instrlite_count = __atomic_load_n(&ExecProcNodeInstrLite_calls, __ATOMIC_RELAXED);
++	long long expr_count = __atomic_load_n(&ExecInterpExpr_calls, __ATOMIC_RELAXED);
++
++	fprintf(stderr, "=====================\n");
++	fprintf(stderr, "ExecInterpExpr: %lld\n", expr_count);
++	fprintf(stderr, "ExecProcNodeInstr: %lld\n", instr_count);
++	fprintf(stderr, "ExecProcNodeInstrLite: %lld\n", instrlite_count);
++	fprintf(stderr, "InstrStartNode: %lld\n", start_count);
++	fprintf(stderr, "InstrStopNode: %lld\n", stop_count);
++	fprintf(stderr, "InstrEndLoop: %lld\n", loop_count);
++
++	__atomic_store_n(&InstrStartNode_calls, 0, __ATOMIC_RELAXED);
++	__atomic_store_n(&InstrStopNode_calls, 0, __ATOMIC_RELAXED);
++	__atomic_store_n(&InstrEndLoop_calls, 0, __ATOMIC_RELAXED);
++	__atomic_store_n(&ExecProcNodeInstr_calls, 0, __ATOMIC_RELAXED);
++	__atomic_store_n(&ExecProcNodeInstrLite_calls, 0, __ATOMIC_RELAXED);
++	__atomic_store_n(&ExecInterpExpr_calls, 0, __ATOMIC_RELAXED);
++}
+ 
+ /* ----------------------------------------------------------------
+  *		infrastructure for valgrind debugging
+@@ -4241,7 +4271,8 @@ PostgresMain(const char *dbname, const char *username)
+ 		 */
+ 		pqsignal(SIGPIPE, SIG_IGN);
+ 		pqsignal(SIGUSR1, procsignal_sigusr1_handler);
+-		pqsignal(SIGUSR2, SIG_IGN);
++		//pqsignal(SIGUSR2, SIG_IGN);
++		pqsignal(SIGUSR2, print_function_counts);
+ 		pqsignal(SIGFPE, FloatExceptionHandler);
+ 
+ 		/*
+diff --git a/src/backend/utils/init/globals.c b/src/backend/utils/init/globals.c
+index d31cb45a058..7ff7f2c90d2 100644
+--- a/src/backend/utils/init/globals.c
++++ b/src/backend/utils/init/globals.c
+@@ -165,3 +165,14 @@ int			notify_buffers = 16;
+ int			serializable_buffers = 32;
+ int			subtransaction_buffers = 0;
+ int			transaction_buffers = 0;
++
++/*
++ * function counter
++ */
++volatile long long InstrStartNode_calls = 0;
++volatile long long InstrStopNode_calls = 0;
++volatile long long InstrEndLoop_calls = 0;
++
++volatile long long ExecProcNodeInstr_calls = 0;
++volatile long long ExecProcNodeInstrLite_calls = 0;
++volatile long long ExecInterpExpr_calls = 0;
+diff --git a/src/include/miscadmin.h b/src/include/miscadmin.h
+index 1bef98471c3..d1101c46e7f 100644
+--- a/src/include/miscadmin.h
++++ b/src/include/miscadmin.h
+@@ -539,4 +539,15 @@ extern void RestoreClientConnectionInfo(char *conninfo);
+ /* in executor/nodeHash.c */
+ extern size_t get_hash_memory_limit(void);
+ 
++
++/*
++ *
++ */
++extern volatile long long InstrStartNode_calls;
++extern volatile long long InstrStopNode_calls;
++extern volatile long long InstrEndLoop_calls;
++extern volatile long long ExecProcNodeInstr_calls;
++extern volatile long long ExecProcNodeInstrLite_calls;
++extern volatile long long ExecInterpExpr_calls;
++
+ #endif							/* MISCADMIN_H */

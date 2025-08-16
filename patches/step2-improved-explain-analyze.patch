@@ -1,0 +1,68 @@
+diff --git a/src/backend/executor/execProcnode.c b/src/backend/executor/execProcnode.c
+index f5f9cfbeead..aa0d6bbb50e 100644
+--- a/src/backend/executor/execProcnode.c
++++ b/src/backend/executor/execProcnode.c
+@@ -121,6 +121,7 @@
+ 
+ static TupleTableSlot *ExecProcNodeFirst(PlanState *node);
+ static TupleTableSlot *ExecProcNodeInstr(PlanState *node);
++static TupleTableSlot *ExecProcNodeInstrLite(PlanState *node);
+ static bool ExecShutdownNode_walker(PlanState *node, void *context);
+ 
+ 
+@@ -462,7 +463,20 @@ ExecProcNodeFirst(PlanState *node)
+ 	 * have ExecProcNode() directly call the relevant function from now on.
+ 	 */
+ 	if (node->instrument)
+-		node->ExecProcNode = ExecProcNodeInstr;
++	{
++		/*--
++		 * Use ExecProcNodeInstrLite() to avoid calling InstrStartNode()
++		 * and InstrStopNode() when the following conditions are not required:
++		 * - need_timer
++		 * - need_bufusage
++		 * - need_walusage
++		 */
++		if (node->instrument->need_timer || node->instrument->need_bufusage
++			|| node->instrument->need_walusage)
++			node->ExecProcNode = ExecProcNodeInstr;
++		else
++			node->ExecProcNode = ExecProcNodeInstrLite;
++	}
+ 	else
+ 		node->ExecProcNode = node->ExecProcNodeReal;
+ 
+@@ -490,6 +504,33 @@ ExecProcNodeInstr(PlanState *node)
+ }
+ 
+ 
++/*
++ * A simplified version of ExecProcNodeInstr. When the following conditions
++ * are not required, this function avoids calling InstrStartNode and InstrStopNode.
++ * Instead, it performs only two minimal checks:
++ * - need_timer
++ * - need_bufusage
++ * - need_walusage
++ */
++static TupleTableSlot *
++ExecProcNodeInstrLite(PlanState *node)
++{
++	TupleTableSlot *result;
++
++	result = node->ExecProcNodeReal(node);
++
++	/* count the returned tuples */
++	if (!TupIsNull(result))
++		node->instrument->tuplecount += 1.0;
++
++	/* Is this the first tuple of this cycle? */
++	if (!node->instrument->running)
++		node->instrument->running = true;
++
++	return result;
++}
++
++
+ /* ----------------------------------------------------------------
+  *		MultiExecProcNode
+  *
