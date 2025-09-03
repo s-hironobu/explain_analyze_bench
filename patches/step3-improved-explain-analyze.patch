@@ -1,14 +1,14 @@
 diff --git a/src/backend/commands/explain.c b/src/backend/commands/explain.c
-index 8345bc0264b..dc42d548d5e 100644
+index 8345bc0264b..b7dd299497a 100644
 --- a/src/backend/commands/explain.c
 +++ b/src/backend/commands/explain.c
 @@ -1133,11 +1133,19 @@ report_triggers(ResultRelInfo *rInfo, bool show_relname, ExplainState *es)
  				appendStringInfo(es->str, " for constraint %s", conname);
  			if (show_relname)
  				appendStringInfo(es->str, " on %s", relname);
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +			if (es->timing)
-+				appendStringInfo(es->str, ": time=%.3f calls=%lld\n",
++				appendStringInfo(es->str, ": time=%.3f calls=%llu\n",
 +								 1000.0 * instr->total, instr->ntuples);
 +			else
 +				appendStringInfo(es->str, ": calls=%lld\n", instr->ntuples);
@@ -26,7 +26,7 @@ index 8345bc0264b..dc42d548d5e 100644
  			if (es->timing)
  				ExplainPropertyFloat("Time", "ms", 1000.0 * instr->total, 3,
  									 es);
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +			ExplainPropertyInteger("Calls", NULL, instr->ntuples, es);
 +#else
  			ExplainPropertyFloat("Calls", NULL, instr->ntuples, 0, es);
@@ -38,8 +38,8 @@ index 8345bc0264b..dc42d548d5e 100644
  	if (es->analyze &&
  		planstate->instrument && planstate->instrument->nloops > 0)
  	{
-+#ifdef DOUBLE_TO_LONG_LONG_INT
-+		long long int nloops = planstate->instrument->nloops;
++#ifdef UINT64
++		uint64_t 	nloops = planstate->instrument->nloops;
 +		double		startup_ms = 1000.0 * planstate->instrument->startup / (double) nloops;
 +		double		total_ms = 1000.0 * planstate->instrument->total / (double) nloops;
 +		double		rows = planstate->instrument->ntuples / (double) nloops;
@@ -56,8 +56,8 @@ index 8345bc0264b..dc42d548d5e 100644
  			if (es->timing)
  				appendStringInfo(es->str, "time=%.3f..%.3f ", startup_ms, total_ms);
  
-+#ifdef DOUBLE_TO_LONG_LONG_INT
-+			appendStringInfo(es->str, "rows=%.2f loops=%lld)", rows, nloops);
++#ifdef UINT64
++			appendStringInfo(es->str, "rows=%.2f loops=%llu)", rows, nloops);
 +#else
  			appendStringInfo(es->str, "rows=%.2f loops=%.0f)", rows, nloops);
 +#endif
@@ -68,7 +68,7 @@ index 8345bc0264b..dc42d548d5e 100644
  									 3, es);
  			}
  			ExplainPropertyFloat("Actual Rows", NULL, rows, 2, es);
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +			ExplainPropertyInteger("Actual Loops", NULL, nloops, es);
 +#else
  			ExplainPropertyFloat("Actual Loops", NULL, nloops, 0, es);
@@ -80,7 +80,7 @@ index 8345bc0264b..dc42d548d5e 100644
  				ExplainPropertyFloat("Actual Total Time", "ms", 0.0, 3, es);
  			}
  			ExplainPropertyFloat("Actual Rows", NULL, 0.0, 0, es);
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +			ExplainPropertyInteger("Actual Loops", NULL, 0, es);
 +#else
  			ExplainPropertyFloat("Actual Loops", NULL, 0.0, 0, es);
@@ -92,8 +92,8 @@ index 8345bc0264b..dc42d548d5e 100644
  		for (int n = 0; n < w->num_workers; n++)
  		{
  			Instrumentation *instrument = &w->instrument[n];
-+#ifdef DOUBLE_TO_LONG_LONG_INT
-+			long long int nloops = instrument->nloops;
++#ifdef UINT64
++			uint64_t 	nloops = instrument->nloops;
 +#else
  			double		nloops = instrument->nloops;
 +#endif
@@ -103,7 +103,7 @@ index 8345bc0264b..dc42d548d5e 100644
  
  			if (nloops <= 0)
  				continue;
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +			startup_ms = 1000.0 * instrument->startup / (double) nloops;
 +			total_ms = 1000.0 * instrument->total / (double) nloops;
 +			rows = instrument->ntuples / (double) nloops;
@@ -119,7 +119,7 @@ index 8345bc0264b..dc42d548d5e 100644
  				if (es->timing)
  					appendStringInfo(es->str, "time=%.3f..%.3f ", startup_ms, total_ms);
  
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +				appendStringInfo(es->str, "rows=%.2f loops=%lld\n", rows, nloops);
 +#else
  				appendStringInfo(es->str, "rows=%.2f loops=%.0f\n", rows, nloops);
@@ -131,7 +131,7 @@ index 8345bc0264b..dc42d548d5e 100644
  				}
  
  				ExplainPropertyFloat("Actual Rows", NULL, rows, 2, es);
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +				ExplainPropertyInteger("Actual Loops", NULL, nloops, es);
 +#else
  				ExplainPropertyFloat("Actual Loops", NULL, nloops, 0, es);
@@ -143,7 +143,7 @@ index 8345bc0264b..dc42d548d5e 100644
  				show_instrumentation_count("Rows Removed by Filter", 1,
  										   planstate, es);
  			if (es->analyze)
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +				ExplainPropertyInteger("Heap Fetches", NULL,
 +									   planstate->instrument->ntuples2, es);
 +#else
@@ -157,8 +157,8 @@ index 8345bc0264b..dc42d548d5e 100644
  		for (int n = 0; n < w->num_workers; n++)
  		{
  			Instrumentation *instrument = &w->instrument[n];
-+#ifdef DOUBLE_TO_LONG_LONG_INT
-+			long long int nloops = instrument->nloops;
++#ifdef UINT64
++			uint64_t 	nloops = instrument->nloops;
 +#else
  			double		nloops = instrument->nloops;
 +#endif
@@ -169,8 +169,8 @@ index 8345bc0264b..dc42d548d5e 100644
  						   PlanState *planstate, ExplainState *es)
  {
  	double		nfiltered;
-+#ifdef DOUBLE_TO_LONG_LONG_INT
-+	long long int nloops;
++#ifdef UINT64
++	uint64_t 	nloops;
 +#else
  	double		nloops;
 +#endif
@@ -181,7 +181,7 @@ index 8345bc0264b..dc42d548d5e 100644
  	if (nfiltered > 0 || es->format != EXPLAIN_FORMAT_TEXT)
  	{
  		if (nloops > 0)
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +			ExplainPropertyFloat(qlabel, NULL, nfiltered / (double) nloops, 0, es);
 +#else
  			ExplainPropertyFloat(qlabel, NULL, nfiltered / nloops, 0, es);
@@ -193,10 +193,10 @@ index 8345bc0264b..dc42d548d5e 100644
  		/* EXPLAIN ANALYZE display of actual outcome for each tuple proposed */
  		if (es->analyze && mtstate->ps.instrument)
  		{
-+#ifdef DOUBLE_TO_LONG_LONG_INT
-+			long long int total;
-+			long long int insert_path;
-+			long long int other_path;
++#ifdef UINT64
++			uint64_t 	total;
++			uint64_t 	 insert_path;
++			uint64_t 	 other_path;
 +#else
  			double		total;
  			double		insert_path;
@@ -209,7 +209,7 @@ index 8345bc0264b..dc42d548d5e 100644
  			other_path = mtstate->ps.instrument->ntuples2;
  			insert_path = total - other_path;
  
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +			ExplainPropertyInteger("Tuples Inserted", NULL,
 +								   insert_path, es);
 +			ExplainPropertyInteger("Conflicting Tuples", NULL,
@@ -224,14 +224,14 @@ index 8345bc0264b..dc42d548d5e 100644
  	}
  	else if (node->operation == CMD_MERGE)
 diff --git a/src/backend/executor/execAsync.c b/src/backend/executor/execAsync.c
-index 5d3cabe73e3..7bce8890a4f 100644
+index 5d3cabe73e3..753fbb794e5 100644
 --- a/src/backend/executor/execAsync.c
 +++ b/src/backend/executor/execAsync.c
 @@ -47,8 +47,13 @@ ExecAsyncRequest(AsyncRequest *areq)
  
  	/* must provide our own instrumentation support */
  	if (areq->requestee->instrument)
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +		InstrStopNode(areq->requestee->instrument,
 +					  TupIsNull(areq->result) ? 0 : 1);
 +#else
@@ -245,7 +245,7 @@ index 5d3cabe73e3..7bce8890a4f 100644
  
  	/* must provide our own instrumentation support */
  	if (areq->requestee->instrument)
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +		InstrStopNode(areq->requestee->instrument, 0);
 +#else
  		InstrStopNode(areq->requestee->instrument, 0.0);
@@ -257,7 +257,7 @@ index 5d3cabe73e3..7bce8890a4f 100644
  
  	/* must provide our own instrumentation support */
  	if (areq->requestee->instrument)
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +		InstrStopNode(areq->requestee->instrument,
 +					  TupIsNull(areq->result) ? 0 : 1);
 +#else
@@ -267,8 +267,24 @@ index 5d3cabe73e3..7bce8890a4f 100644
  }
  
  /*
+diff --git a/src/backend/executor/execMain.c b/src/backend/executor/execMain.c
+index 0391798dd2c..740a0b64758 100644
+--- a/src/backend/executor/execMain.c
++++ b/src/backend/executor/execMain.c
+@@ -246,7 +246,11 @@ standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
+ 	estate->es_snapshot = RegisterSnapshot(queryDesc->snapshot);
+ 	estate->es_crosscheck_snapshot = RegisterSnapshot(queryDesc->crosscheck_snapshot);
+ 	estate->es_top_eflags = eflags;
++#ifdef ALWAYS_INSTR
++	estate->es_instrument = true;
++#else
+ 	estate->es_instrument = queryDesc->instrument_options;
++#endif
+ 	estate->es_jit_flags = queryDesc->plannedstmt->jitFlags;
+ 
+ 	/*
 diff --git a/src/backend/executor/execProcnode.c b/src/backend/executor/execProcnode.c
-index aa0d6bbb50e..8068549fb2b 100644
+index aa0d6bbb50e..a274178beb3 100644
 --- a/src/backend/executor/execProcnode.c
 +++ b/src/backend/executor/execProcnode.c
 @@ -121,7 +121,9 @@
@@ -315,7 +331,7 @@ index aa0d6bbb50e..8068549fb2b 100644
  
  	result = node->ExecProcNodeReal(node);
  
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +	InstrStopNode(node->instrument, TupIsNull(result) ? 0 : 1);
 +#else
  	InstrStopNode(node->instrument, TupIsNull(result) ? 0.0 : 1.0);
@@ -337,6 +353,42 @@ index aa0d6bbb50e..8068549fb2b 100644
  
  
  /* ----------------------------------------------------------------
+diff --git a/src/backend/executor/instrument.c b/src/backend/executor/instrument.c
+index 0896b890bc3..51c9cbe8dc0 100644
+--- a/src/backend/executor/instrument.c
++++ b/src/backend/executor/instrument.c
+@@ -36,9 +36,15 @@ InstrAlloc(int n, int instrument_options, bool async_mode)
+ 	instr = palloc0(n * sizeof(Instrumentation));
+ 	if (instrument_options & (INSTRUMENT_BUFFERS | INSTRUMENT_TIMER | INSTRUMENT_WAL))
+ 	{
++#ifdef ALWAYS_INSTR
++		bool		need_buffers = false;
++		bool		need_wal = false;
++		bool		need_timer = false;
++#else
+ 		bool		need_buffers = (instrument_options & INSTRUMENT_BUFFERS) != 0;
+ 		bool		need_wal = (instrument_options & INSTRUMENT_WAL) != 0;
+ 		bool		need_timer = (instrument_options & INSTRUMENT_TIMER) != 0;
++#endif
+ 		int			i;
+ 
+ 		for (i = 0; i < n; i++)
+@@ -58,9 +64,15 @@ void
+ InstrInit(Instrumentation *instr, int instrument_options)
+ {
+ 	memset(instr, 0, sizeof(Instrumentation));
++#ifdef ALWAYS_INSTR
++	instr->need_bufusage = false;
++	instr->need_walusage = false;
++	instr->need_timer = false;
++#else
+ 	instr->need_bufusage = (instrument_options & INSTRUMENT_BUFFERS) != 0;
+ 	instr->need_walusage = (instrument_options & INSTRUMENT_WAL) != 0;
+ 	instr->need_timer = (instrument_options & INSTRUMENT_TIMER) != 0;
++#endif
+ }
+ 
+ /* aggregate instrumentation information */
 diff --git a/src/backend/executor/nodeAgg.c b/src/backend/executor/nodeAgg.c
 index 377e016d732..4bd3e20a5e6 100644
 --- a/src/backend/executor/nodeAgg.c
@@ -2471,7 +2523,7 @@ index f6379c35d2f..c01016af726 100644
  
  
 diff --git a/src/include/executor/executor.h b/src/include/executor/executor.h
-index 104b059544d..3b435f92f15 100644
+index 104b059544d..edbc36fc526 100644
 --- a/src/include/executor/executor.h
 +++ b/src/include/executor/executor.h
 @@ -296,7 +296,6 @@ extern void ExecEndNode(PlanState *node);
@@ -2482,7 +2534,7 @@ index 104b059544d..3b435f92f15 100644
  /* ----------------------------------------------------------------
   *		ExecProcNode
   *
-@@ -314,6 +313,49 @@ ExecProcNode(PlanState *node)
+@@ -314,6 +313,51 @@ ExecProcNode(PlanState *node)
  }
  #endif
  
@@ -2503,9 +2555,11 @@ index 104b059544d..3b435f92f15 100644
 +{
 +	Instrumentation *const instr = node->instrument;
 +
++#ifndef ALWAYS_INSTR
 +	/* Most common case: no instrumentation */
 +	if (!instr)
 +		return result;
++#endif
 +
 +	/*
 +	 * Assert(!instr->need_timer && !instro->need_bufusage &&
@@ -2533,15 +2587,15 @@ index 104b059544d..3b435f92f15 100644
   * prototypes from functions in execExpr.c
   */
 diff --git a/src/include/executor/instrument.h b/src/include/executor/instrument.h
-index 7ce1e3b55c1..0d8c06b656d 100644
+index 7ce1e3b55c1..ecedfaf08e6 100644
 --- a/src/include/executor/instrument.h
 +++ b/src/include/executor/instrument.h
 @@ -78,15 +78,25 @@ typedef struct Instrumentation
  	instr_time	starttime;		/* start time of current iteration of node */
  	instr_time	counter;		/* accumulated runtime for this node */
  	double		firsttuple;		/* time for first tuple of this cycle */
-+#ifdef DOUBLE_TO_LONG_LONG_INT
-+	long long int tuplecount;	/* # of tuples emitted so far this cycle */
++#ifdef UINT64
++	uint64_t 	tuplecount;		/* # of tuples emitted so far this cycle */
 +#else
  	double		tuplecount;		/* # of tuples emitted so far this cycle */
 +#endif
@@ -2550,10 +2604,10 @@ index 7ce1e3b55c1..0d8c06b656d 100644
  	/* Accumulated statistics across all completed cycles: */
  	double		startup;		/* total startup time (in seconds) */
  	double		total;			/* total time (in seconds) */
-+#ifdef DOUBLE_TO_LONG_LONG_INT
-+	long long int ntuples;		/* total tuples produced */
-+	long long int ntuples2;		/* secondary node-specific tuple counter */
-+	long long int nloops;		/* # of run cycles for this node */
++#ifdef UINT64
++	uint64_t 	ntuples;		/* total tuples produced */
++	uint64_t 	ntuples2;		/* secondary node-specific tuple counter */
++	uint64_t 	nloops;			/* # of run cycles for this node */
 +#else
  	double		ntuples;		/* total tuples produced */
  	double		ntuples2;		/* secondary node-specific tuple counter */
@@ -2566,16 +2620,16 @@ index 7ce1e3b55c1..0d8c06b656d 100644
  }
  
  /* Exit from a plan node */
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +static pg_attribute_always_inline void
-+InstrStopNode(Instrumentation *instr, long long int nTuples)
++InstrStopNode(Instrumentation *instr, uint64_t nTuples)
 +#else
  static pg_attribute_always_inline void
  InstrStopNode(Instrumentation *instr, double nTuples)
 +#endif
  {
-+#ifdef DOUBLE_TO_LONG_LONG_INT
-+	long long int save_tuplecount = instr->tuplecount;
++#ifdef UINT64
++	uint64_t 	save_tuplecount = instr->tuplecount;
 +#else
  	double		save_tuplecount = instr->tuplecount;
 +#endif
@@ -2586,7 +2640,7 @@ index 7ce1e3b55c1..0d8c06b656d 100644
  		 * In async mode, if the plan node hadn't emitted any tuples before,
  		 * this might be the first tuple
  		 */
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +		if (instr->need_timer && instr->async_mode && save_tuplecount < 1)
 +			instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
 +#else
@@ -2597,9 +2651,9 @@ index 7ce1e3b55c1..0d8c06b656d 100644
  }
  
  /* Update tuple count */
-+#ifdef DOUBLE_TO_LONG_LONG_INT
++#ifdef UINT64
 +static pg_attribute_always_inline void
-+InstrUpdateTupleCount(Instrumentation *instr, long long int nTuples)
++InstrUpdateTupleCount(Instrumentation *instr, uint64_t nTuples)
 +#else
  static pg_attribute_always_inline void
  InstrUpdateTupleCount(Instrumentation *instr, double nTuples)
