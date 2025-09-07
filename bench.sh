@@ -236,6 +236,34 @@ step3_always_instr_bench() {
     bench "STEP3 always instrument" "batch.sql" "step3-always-instr.log"
 }
 
+step4_bench() {
+    make_clean
+    git_reset
+    cd $SOURCE_DIR
+    patch -p1 < ../patches/step1-improved-explain-analyze.patch
+    patch -p1 < ../patches/step2-improved-explain-analyze.patch
+    patch -p1 < ../patches/step3-improved-explain-analyze.patch
+    patch -p1 < ../patches/step4-improved-explain-analyze.patch
+    ./configure --prefix=$PGSQL_DIR --without-icu CFLAGS="-O3 -g"
+    make -j4 && make install
+    cd $PGSQL_DIR
+    bench "STEP4" "batch.sql" "step4.log"
+}
+
+step5_bench() {
+    make_clean
+    git_reset
+    cd $SOURCE_DIR
+    patch -p1 < ../patches/step1-improved-explain-analyze.patch
+    patch -p1 < ../patches/step2-improved-explain-analyze.patch
+    patch -p1 < ../patches/step3-improved-explain-analyze.patch
+    patch -p1 < ../patches/step4-improved-explain-analyze.patch
+    patch -p1 < ../patches/step5-improved-explain-analyze.patch
+    ./configure --prefix=$PGSQL_DIR --without-icu CFLAGS="-O3 -g"
+    make -j4 && make install
+    cd $PGSQL_DIR
+    bench "STEP5" "batch.sql" "step5.log"
+}
 
 benchmark() {
     #
@@ -280,13 +308,23 @@ benchmark() {
 	    echo "STEP3 Always Instrument"
 	    step3_always_instr_bench
             ;;
+	step4)
+	    echo "STEP4"
+	    step4_bench
+            ;;
+	step5)
+	    echo "STEP5"
+	    step5_bench
+            ;;
 	ALL)
 	    echo "ALL"
 	    step0_bench
 	    step1_bench
 	    step2_bench
 	    step3_bench
-	    step3_always_instr_bench
+	    #step3_always_instr_bench
+	    step4_bench
+	    step5_bench
 	    ;;
 	*)
 	    echo "Error: '$1' is not a valid argument."
@@ -303,18 +341,18 @@ benchmark() {
 #--------------------
 
 if [ $# -ne 1 ] && [ $# -ne 2 ]; then
-    echo "Usage: $0 {setup|benchmark} [step0|step1|step2|step3|step3-always-instr]"
+    echo "Usage: $0 {setup|benchmark} [step0|step1|step2|step3|step3-always-instr|step4|step5]"
     exit 1
 fi
 
 PARAM="ALL"
 if [ $# -eq 2 ]; then
     case "$2" in
-	"step0" | "step1" | "step2" | "step3" | "step3-always-instr" )
+	"step0" | "step1" | "step2" | "step3" | "step3-always-instr" | "step4" | "step5" )
 	    PARAM=$2
 	    ;;
 	*)
-	    echo "Usage: $0 {setup|benchmark} [step0|step1|step2|step3|step3-always-instr]"
+	    echo "Usage: $0 {setup|benchmark} [step0|step1|step2|step3|step3-always-instr|step4|step5]"
 	    exit 1
 	    ;;
     esac

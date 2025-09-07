@@ -1,0 +1,628 @@
+diff --git a/src/backend/commands/explain.c b/src/backend/commands/explain.c
+index b7dd299497a..b6a04454ffd 100644
+--- a/src/backend/commands/explain.c
++++ b/src/backend/commands/explain.c
+@@ -1133,19 +1133,11 @@ report_triggers(ResultRelInfo *rInfo, bool show_relname, ExplainState *es)
+ 				appendStringInfo(es->str, " for constraint %s", conname);
+ 			if (show_relname)
+ 				appendStringInfo(es->str, " on %s", relname);
+-#ifdef UINT64
+ 			if (es->timing)
+-				appendStringInfo(es->str, ": time=%.3f calls=%llu\n",
++				appendStringInfo(es->str, ": time=%.3f calls=%lld\n",
+ 								 1000.0 * instr->total, instr->ntuples);
+ 			else
+ 				appendStringInfo(es->str, ": calls=%lld\n", instr->ntuples);
+-#else
+-			if (es->timing)
+-				appendStringInfo(es->str, ": time=%.3f calls=%.0f\n",
+-								 1000.0 * instr->total, instr->ntuples);
+-			else
+-				appendStringInfo(es->str, ": calls=%.0f\n", instr->ntuples);
+-#endif
+ 		}
+ 		else
+ 		{
+@@ -1156,11 +1148,7 @@ report_triggers(ResultRelInfo *rInfo, bool show_relname, ExplainState *es)
+ 			if (es->timing)
+ 				ExplainPropertyFloat("Time", "ms", 1000.0 * instr->total, 3,
+ 									 es);
+-#ifdef UINT64
+ 			ExplainPropertyInteger("Calls", NULL, instr->ntuples, es);
+-#else
+-			ExplainPropertyFloat("Calls", NULL, instr->ntuples, 0, es);
+-#endif
+ 		}
+ 
+ 		if (conname)
+@@ -1841,17 +1829,16 @@ ExplainNode(PlanState *planstate, List *ancestors,
+ 	if (es->analyze &&
+ 		planstate->instrument && planstate->instrument->nloops > 0)
+ 	{
+-#ifdef UINT64
++		double		startup_ms;
++		double		total_ms;
+ 		uint64_t 	nloops = planstate->instrument->nloops;
+-		double		startup_ms = 1000.0 * planstate->instrument->startup / (double) nloops;
+-		double		total_ms = 1000.0 * planstate->instrument->total / (double) nloops;
+ 		double		rows = planstate->instrument->ntuples / (double) nloops;
+-#else
+-		double		nloops = planstate->instrument->nloops;
+-		double		startup_ms = 1000.0 * planstate->instrument->startup / nloops;
+-		double		total_ms = 1000.0 * planstate->instrument->total / nloops;
+-		double		rows = planstate->instrument->ntuples / nloops;
+-#endif
++
++		if (es->timing)
++		{
++			startup_ms = 1000.0 * planstate->instrument->startup / (double) nloops;
++			total_ms = 1000.0 * planstate->instrument->total / (double) nloops;
++		}
+ 
+ 		if (es->format == EXPLAIN_FORMAT_TEXT)
+ 		{
+@@ -1860,11 +1847,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
+ 			if (es->timing)
+ 				appendStringInfo(es->str, "time=%.3f..%.3f ", startup_ms, total_ms);
+ 
+-#ifdef UINT64
+-			appendStringInfo(es->str, "rows=%.2f loops=%llu)", rows, nloops);
+-#else
+-			appendStringInfo(es->str, "rows=%.2f loops=%.0f)", rows, nloops);
+-#endif
++			appendStringInfo(es->str, "rows=%.2f loops=%lld)", rows, nloops);
+ 		}
+ 		else
+ 		{
+@@ -1876,11 +1859,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
+ 									 3, es);
+ 			}
+ 			ExplainPropertyFloat("Actual Rows", NULL, rows, 2, es);
+-#ifdef UINT64
+ 			ExplainPropertyInteger("Actual Loops", NULL, nloops, es);
+-#else
+-			ExplainPropertyFloat("Actual Loops", NULL, nloops, 0, es);
+-#endif
+ 		}
+ 	}
+ 	else if (es->analyze)
+@@ -1895,11 +1874,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
+ 				ExplainPropertyFloat("Actual Total Time", "ms", 0.0, 3, es);
+ 			}
+ 			ExplainPropertyFloat("Actual Rows", NULL, 0.0, 0, es);
+-#ifdef UINT64
+ 			ExplainPropertyInteger("Actual Loops", NULL, 0, es);
+-#else
+-			ExplainPropertyFloat("Actual Loops", NULL, 0.0, 0, es);
+-#endif
+ 		}
+ 	}
+ 
+@@ -1920,26 +1895,20 @@ ExplainNode(PlanState *planstate, List *ancestors,
+ 		for (int n = 0; n < w->num_workers; n++)
+ 		{
+ 			Instrumentation *instrument = &w->instrument[n];
+-#ifdef UINT64
+ 			uint64_t 	nloops = instrument->nloops;
+-#else
+-			double		nloops = instrument->nloops;
+-#endif
+ 			double		startup_ms;
+ 			double		total_ms;
+ 			double		rows;
+ 
+ 			if (nloops <= 0)
+ 				continue;
+-#ifdef UINT64
+-			startup_ms = 1000.0 * instrument->startup / (double) nloops;
+-			total_ms = 1000.0 * instrument->total / (double) nloops;
++
++			if (es->timing)
++			{
++				startup_ms = 1000.0 * instrument->startup / (double) nloops;
++				total_ms = 1000.0 * instrument->total / (double) nloops;
++			}
+ 			rows = instrument->ntuples / (double) nloops;
+-#else
+-			startup_ms = 1000.0 * instrument->startup / nloops;
+-			total_ms = 1000.0 * instrument->total / nloops;
+-			rows = instrument->ntuples / nloops;
+-#endif
+ 
+ 			ExplainOpenWorker(n, es);
+ 
+@@ -1950,11 +1919,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
+ 				if (es->timing)
+ 					appendStringInfo(es->str, "time=%.3f..%.3f ", startup_ms, total_ms);
+ 
+-#ifdef UINT64
+ 				appendStringInfo(es->str, "rows=%.2f loops=%lld\n", rows, nloops);
+-#else
+-				appendStringInfo(es->str, "rows=%.2f loops=%.0f\n", rows, nloops);
+-#endif
+ 			}
+ 			else
+ 			{
+@@ -1967,11 +1932,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
+ 				}
+ 
+ 				ExplainPropertyFloat("Actual Rows", NULL, rows, 2, es);
+-#ifdef UINT64
+ 				ExplainPropertyInteger("Actual Loops", NULL, nloops, es);
+-#else
+-				ExplainPropertyFloat("Actual Loops", NULL, nloops, 0, es);
+-#endif
+ 			}
+ 
+ 			ExplainCloseWorker(n, es);
+@@ -2029,13 +1990,8 @@ ExplainNode(PlanState *planstate, List *ancestors,
+ 				show_instrumentation_count("Rows Removed by Filter", 1,
+ 										   planstate, es);
+ 			if (es->analyze)
+-#ifdef UINT64
+ 				ExplainPropertyInteger("Heap Fetches", NULL,
+ 									   planstate->instrument->ntuples2, es);
+-#else
+-				ExplainPropertyFloat("Heap Fetches", NULL,
+-									 planstate->instrument->ntuples2, 0, es);
+-#endif
+ 			show_indexsearches_info(planstate, es);
+ 			break;
+ 		case T_BitmapIndexScan:
+@@ -2349,11 +2305,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
+ 		for (int n = 0; n < w->num_workers; n++)
+ 		{
+ 			Instrumentation *instrument = &w->instrument[n];
+-#ifdef UINT64
+ 			uint64_t 	nloops = instrument->nloops;
+-#else
+-			double		nloops = instrument->nloops;
+-#endif
+ 
+ 			if (nloops <= 0)
+ 				continue;
+@@ -4043,11 +3995,7 @@ show_instrumentation_count(const char *qlabel, int which,
+ 						   PlanState *planstate, ExplainState *es)
+ {
+ 	double		nfiltered;
+-#ifdef UINT64
+ 	uint64_t 	nloops;
+-#else
+-	double		nloops;
+-#endif
+ 
+ 	if (!es->analyze || !planstate->instrument)
+ 		return;
+@@ -4062,11 +4010,7 @@ show_instrumentation_count(const char *qlabel, int which,
+ 	if (nfiltered > 0 || es->format != EXPLAIN_FORMAT_TEXT)
+ 	{
+ 		if (nloops > 0)
+-#ifdef UINT64
+ 			ExplainPropertyFloat(qlabel, NULL, nfiltered / (double) nloops, 0, es);
+-#else
+-			ExplainPropertyFloat(qlabel, NULL, nfiltered / nloops, 0, es);
+-#endif
+ 		else
+ 			ExplainPropertyFloat(qlabel, NULL, 0.0, 0, es);
+ 	}
+@@ -4747,15 +4691,9 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
+ 		/* EXPLAIN ANALYZE display of actual outcome for each tuple proposed */
+ 		if (es->analyze && mtstate->ps.instrument)
+ 		{
+-#ifdef UINT64
+ 			uint64_t 	total;
+-			uint64_t 	 insert_path;
+-			uint64_t 	 other_path;
+-#else
+-			double		total;
+-			double		insert_path;
+-			double		other_path;
+-#endif
++			uint64_t 	insert_path;
++			uint64_t 	other_path;
+ 
+ 			InstrEndLoop(outerPlanState(mtstate)->instrument);
+ 
+@@ -4764,17 +4702,10 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
+ 			other_path = mtstate->ps.instrument->ntuples2;
+ 			insert_path = total - other_path;
+ 
+-#ifdef UINT64
+ 			ExplainPropertyInteger("Tuples Inserted", NULL,
+ 								   insert_path, es);
+ 			ExplainPropertyInteger("Conflicting Tuples", NULL,
+ 								   other_path, es);
+-#else
+-			ExplainPropertyFloat("Tuples Inserted", NULL,
+-								 insert_path, 0, es);
+-			ExplainPropertyFloat("Conflicting Tuples", NULL,
+-								 other_path, 0, es);
+-#endif
+ 		}
+ 	}
+ 	else if (node->operation == CMD_MERGE)
+@@ -4782,11 +4713,11 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
+ 		/* EXPLAIN ANALYZE display of tuples processed */
+ 		if (es->analyze && mtstate->ps.instrument)
+ 		{
+-			double		total;
+-			double		insert_path;
+-			double		update_path;
+-			double		delete_path;
+-			double		skipped_path;
++			uint64_t 	total;
++			uint64_t 	insert_path;
++			uint64_t 	update_path;
++			uint64_t 	delete_path;
++			uint64_t 	skipped_path;
+ 
+ 			InstrEndLoop(outerPlanState(mtstate)->instrument);
+ 
+@@ -4805,22 +4736,22 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
+ 					ExplainIndentText(es);
+ 					appendStringInfoString(es->str, "Tuples:");
+ 					if (insert_path > 0)
+-						appendStringInfo(es->str, " inserted=%.0f", insert_path);
++						appendStringInfo(es->str, " inserted=%llu", insert_path);
+ 					if (update_path > 0)
+-						appendStringInfo(es->str, " updated=%.0f", update_path);
++						appendStringInfo(es->str, " updated=%llu", update_path);
+ 					if (delete_path > 0)
+-						appendStringInfo(es->str, " deleted=%.0f", delete_path);
++						appendStringInfo(es->str, " deleted=%llu", delete_path);
+ 					if (skipped_path > 0)
+-						appendStringInfo(es->str, " skipped=%.0f", skipped_path);
++						appendStringInfo(es->str, " skipped=%llu", skipped_path);
+ 					appendStringInfoChar(es->str, '\n');
+ 				}
+ 			}
+ 			else
+ 			{
+-				ExplainPropertyFloat("Tuples Inserted", NULL, insert_path, 0, es);
+-				ExplainPropertyFloat("Tuples Updated", NULL, update_path, 0, es);
+-				ExplainPropertyFloat("Tuples Deleted", NULL, delete_path, 0, es);
+-				ExplainPropertyFloat("Tuples Skipped", NULL, skipped_path, 0, es);
++				ExplainPropertyInteger("Tuples Inserted", NULL, insert_path, es);
++				ExplainPropertyInteger("Tuples Updated", NULL, update_path, es);
++				ExplainPropertyInteger("Tuples Deleted", NULL, delete_path, es);
++				ExplainPropertyInteger("Tuples Skipped", NULL, skipped_path, es);
+ 			}
+ 		}
+ 	}
+diff --git a/src/backend/executor/execAsync.c b/src/backend/executor/execAsync.c
+index 753fbb794e5..2e7e2e8874e 100644
+--- a/src/backend/executor/execAsync.c
++++ b/src/backend/executor/execAsync.c
+@@ -47,13 +47,8 @@ ExecAsyncRequest(AsyncRequest *areq)
+ 
+ 	/* must provide our own instrumentation support */
+ 	if (areq->requestee->instrument)
+-#ifdef UINT64
+ 		InstrStopNode(areq->requestee->instrument,
+ 					  TupIsNull(areq->result) ? 0 : 1);
+-#else
+-		InstrStopNode(areq->requestee->instrument,
+-					  TupIsNull(areq->result) ? 0.0 : 1.0);
+-#endif
+ }
+ 
+ /*
+@@ -83,11 +78,7 @@ ExecAsyncConfigureWait(AsyncRequest *areq)
+ 
+ 	/* must provide our own instrumentation support */
+ 	if (areq->requestee->instrument)
+-#ifdef UINT64
+ 		InstrStopNode(areq->requestee->instrument, 0);
+-#else
+-		InstrStopNode(areq->requestee->instrument, 0.0);
+-#endif
+ }
+ 
+ /*
+@@ -115,13 +106,8 @@ ExecAsyncNotify(AsyncRequest *areq)
+ 
+ 	/* must provide our own instrumentation support */
+ 	if (areq->requestee->instrument)
+-#ifdef UINT64
+ 		InstrStopNode(areq->requestee->instrument,
+ 					  TupIsNull(areq->result) ? 0 : 1);
+-#else
+-		InstrStopNode(areq->requestee->instrument,
+-					  TupIsNull(areq->result) ? 0.0 : 1.0);
+-#endif
+ }
+ 
+ /*
+diff --git a/src/backend/executor/execProcnode.c b/src/backend/executor/execProcnode.c
+index a274178beb3..19a1f6d0321 100644
+--- a/src/backend/executor/execProcnode.c
++++ b/src/backend/executor/execProcnode.c
+@@ -516,11 +516,7 @@ ExecProcNodeInstr(PlanState *node)
+ 
+ 	result = node->ExecProcNodeReal(node);
+ 
+-#ifdef UINT64
+ 	InstrStopNode(node->instrument, TupIsNull(result) ? 0 : 1);
+-#else
+-	InstrStopNode(node->instrument, TupIsNull(result) ? 0.0 : 1.0);
+-#endif
+ 
+ 	return result;
+ }
+@@ -547,8 +543,8 @@ ExecProcNodeInstrLite(PlanState *node)
+ 		node->instrument->tuplecount += 1.0;
+ 
+ 	/* Is this the first tuple of this cycle? */
+-	if (!node->instrument->running)
+-		node->instrument->running = true;
++	if (!node->instrument->hot.running)
++		node->instrument->hot.running = true;
+ 
+ 	return result;
+ }
+@@ -857,7 +853,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
+ 	 * has never been executed, so as to avoid incorrectly making it appear
+ 	 * that it has.
+ 	 */
+-	if (node->instrument && node->instrument->running)
++	if (node->instrument && is_running_true(node->instrument))
+ 		InstrStartNode(node->instrument);
+ 
+ 	planstate_tree_walker(node, ExecShutdownNode_walker, context);
+@@ -887,7 +883,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
+ 	}
+ 
+ 	/* Stop the node if we started it above, reporting 0 tuples. */
+-	if (node->instrument && node->instrument->running)
++	if (node->instrument && is_running_true(node->instrument))
+ 		InstrStopNode(node->instrument, 0);
+ 
+ 	return false;
+diff --git a/src/backend/executor/instrument.c b/src/backend/executor/instrument.c
+index 51c9cbe8dc0..c9403db1839 100644
+--- a/src/backend/executor/instrument.c
++++ b/src/backend/executor/instrument.c
+@@ -79,17 +79,17 @@ InstrInit(Instrumentation *instr, int instrument_options)
+ void
+ InstrAggNode(Instrumentation *dst, Instrumentation *add)
+ {
+-	if (!dst->running && add->running)
++	if (!is_running_true(dst) && is_running_true(add))
+ 	{
+-		dst->running = true;
++		set_running_true(dst);
+ 		dst->firsttuple = add->firsttuple;
+ 	}
+-	else if (dst->running && add->running && dst->firsttuple > add->firsttuple)
++	else if (is_running_true(dst) && is_running_true(add) && dst->firsttuple > add->firsttuple)
+ 		dst->firsttuple = add->firsttuple;
+ 
+ 	INSTR_TIME_ADD(dst->counter, add->counter);
+ 
+-	dst->tuplecount += add->tuplecount;
++	add_tuplecount(dst, get_tuplecount(add));
+ 	dst->startup += add->startup;
+ 	dst->total += add->total;
+ 	dst->ntuples += add->ntuples;
+diff --git a/src/include/executor/executor.h b/src/include/executor/executor.h
+index edbc36fc526..30a61422329 100644
+--- a/src/include/executor/executor.h
++++ b/src/include/executor/executor.h
+@@ -328,29 +328,24 @@ ExecProcNode(PlanState *node)
+ static pg_attribute_always_inline TupleTableSlot *
+ PostExecProcNodeInstr(PlanState *node, TupleTableSlot *result)
+ {
+-	Instrumentation *const instr = node->instrument;
++	uint64_t current;
++	Instrumentation *instr = node->instrument;
+ 
+-#ifndef ALWAYS_INSTR
+ 	/* Most common case: no instrumentation */
+ 	if (!instr)
+ 		return result;
+-#endif
+ 
+-	/*
+-	 * Assert(!instr->need_timer && !instro->need_bufusage &&
+-	 * !instr->need_walusage);
+-	 */
++	current = instr->hot_instr;
+ 
+-	/* count the returned tuples */
+ 	if (!TupIsNull(result))
+-		instr->tuplecount += 1.0;
+-
+-	/* Is this the first tuple of this cycle? */
+-	/*--
+-	if (!instr->running)
+-		instr->running = true;
+-	*/
+-	instr->running = true;		/* Always true */
++		/* Increment tuplecount  + running = true */
++		current = ((current + 1) & TUPLECOUNT_MASK) | RUNNING_MASK;
++	else
++		/* running = true */
++		current |= RUNNING_MASK;
++
++	/* store current */
++	instr->hot_instr = current;
+ 
+ 	return result;
+ }
+diff --git a/src/include/executor/instrument.h b/src/include/executor/instrument.h
+index ecedfaf08e6..dc809894319 100644
+--- a/src/include/executor/instrument.h
++++ b/src/include/executor/instrument.h
+@@ -66,43 +66,62 @@ typedef enum InstrumentOption
+ 	INSTRUMENT_ALL = PG_INT32_MAX
+ } InstrumentOption;
+ 
++
+ typedef struct Instrumentation
+ {
++	uint64_t    hot_instr;		/* bit 0: running, bit 1-63: tuplecount */
++
+ 	/* Parameters set at node creation: */
+ 	bool		need_timer;		/* true if we need timer data */
+ 	bool		need_bufusage;	/* true if we need buffer usage data */
+ 	bool		need_walusage;	/* true if we need WAL usage data */
+ 	bool		async_mode;		/* true if node is in async mode */
+ 	/* Info about current plan cycle: */
+-	bool		running;		/* true if we've completed first tuple */
+ 	instr_time	starttime;		/* start time of current iteration of node */
+ 	instr_time	counter;		/* accumulated runtime for this node */
+ 	double		firsttuple;		/* time for first tuple of this cycle */
+-#ifdef UINT64
+-	uint64_t 	tuplecount;		/* # of tuples emitted so far this cycle */
+-#else
+-	double		tuplecount;		/* # of tuples emitted so far this cycle */
+-#endif
+ 	BufferUsage bufusage_start; /* buffer usage at start */
+ 	WalUsage	walusage_start; /* WAL usage at start */
+ 	/* Accumulated statistics across all completed cycles: */
+ 	double		startup;		/* total startup time (in seconds) */
+ 	double		total;			/* total time (in seconds) */
+-#ifdef UINT64
+ 	uint64_t 	ntuples;		/* total tuples produced */
+ 	uint64_t 	ntuples2;		/* secondary node-specific tuple counter */
+ 	uint64_t 	nloops;			/* # of run cycles for this node */
+-#else
+-	double		ntuples;		/* total tuples produced */
+-	double		ntuples2;		/* secondary node-specific tuple counter */
+-	double		nloops;			/* # of run cycles for this node */
+-#endif
+ 	double		nfiltered1;		/* # of tuples removed by scanqual or joinqual */
+ 	double		nfiltered2;		/* # of tuples removed by "other" quals */
+ 	BufferUsage bufusage;		/* total buffer usage */
+ 	WalUsage	walusage;		/* total WAL usage */
+ } Instrumentation;
+ 
++
++/*
++ * For hot_instr in Instrumentation
++ */
++/* bit definition */
++#define RUNNING_BIT         63
++#define RUNNING_MASK        (1ULL << RUNNING_BIT)
++#define TUPLECOUNT_MASK     (~RUNNING_MASK)
++#define MAX_TUPLECOUNT      ((1ULL << 63) - 1)
++
++/* running flag operation */
++#define is_running_true(instr)      (((instr)->hot_instr & RUNNING_MASK) != 0)
++#define set_running_true(instr)     ((instr)->hot_instr |= RUNNING_MASK)
++#define set_running_false(instr)    ((instr)->hot_instr &= TUPLECOUNT_MASK)
++
++/* tuplecount operation */
++#define get_tuplecount(instr)       ((instr)->hot_instr & TUPLECOUNT_MASK)
++#define set_tuplecount(instr, n)    do { \
++		(instr)->hot_instr = ((instr)->hot_instr & RUNNING_MASK) | ((n) & TUPLECOUNT_MASK); \
++} while(0)
++
++#define add_tuplecount(instr, n)    do { \
++		uint64_t current = get_tuplecount(instr);						\
++	uint64_t new_count = (current + (n)) & TUPLECOUNT_MASK;				\
++	(instr)->hot_instr = ((instr)->hot_instr & RUNNING_MASK) | new_count; \
++} while(0)
++
++
+ typedef struct WorkerInstrumentation
+ {
+ 	int			num_workers;	/* # of structures that follow */
+@@ -141,23 +160,14 @@ InstrStartNode(Instrumentation *instr)
+ }
+ 
+ /* Exit from a plan node */
+-#ifdef UINT64
+ static pg_attribute_always_inline void
+ InstrStopNode(Instrumentation *instr, uint64_t nTuples)
+-#else
+-static pg_attribute_always_inline void
+-InstrStopNode(Instrumentation *instr, double nTuples)
+-#endif
+ {
+-#ifdef UINT64
+-	uint64_t 	save_tuplecount = instr->tuplecount;
+-#else
+-	double		save_tuplecount = instr->tuplecount;
+-#endif
++	uint64_t 	save_tuplecount = get_tuplecount(instr);
+ 	instr_time	endtime;
+ 
+ 	/* count the returned tuples */
+-	instr->tuplecount += nTuples;
++	add_tuplecount(instr, nTuples);
+ 
+ 	/* let's update the time only if the timer was requested */
+ 	if (instr->need_timer)
+@@ -181,9 +191,9 @@ InstrStopNode(Instrumentation *instr, double nTuples)
+ 						  &pgWalUsage, &instr->walusage_start);
+ 
+ 	/* Is this the first tuple of this cycle? */
+-	if (!instr->running)
++	if (!is_running_true(instr))
+ 	{
+-		instr->running = true;
++		set_running_true(instr);
+ 		if (instr->need_timer)
+ 			instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
+ 	}
+@@ -193,27 +203,17 @@ InstrStopNode(Instrumentation *instr, double nTuples)
+ 		 * In async mode, if the plan node hadn't emitted any tuples before,
+ 		 * this might be the first tuple
+ 		 */
+-#ifdef UINT64
+ 		if (instr->need_timer && instr->async_mode && save_tuplecount < 1)
+ 			instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
+-#else
+-		if (instr->need_timer && instr->async_mode && save_tuplecount < 1.0)
+-			instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
+-#endif
+ 	}
+ }
+ 
+ /* Update tuple count */
+-#ifdef UINT64
+ static pg_attribute_always_inline void
+ InstrUpdateTupleCount(Instrumentation *instr, uint64_t nTuples)
+-#else
+-static pg_attribute_always_inline void
+-InstrUpdateTupleCount(Instrumentation *instr, double nTuples)
+-#endif
+ {
+ 	/* count the returned tuples */
+-	instr->tuplecount += nTuples;
++	add_tuplecount(instr, nTuples);
+ }
+ 
+ 
+@@ -224,7 +224,7 @@ InstrEndLoop(Instrumentation *instr)
+ 	double		totaltime;
+ 
+ 	/* Skip if nothing has happened, or already shut down */
+-	if (!instr->running)
++	if (!is_running_true(instr))
+ 		return;
+ 
+ 	if (!INSTR_TIME_IS_ZERO(instr->starttime))
+@@ -238,18 +238,18 @@ InstrEndLoop(Instrumentation *instr)
+ 		instr->startup += instr->firsttuple;
+ 		instr->total += totaltime;
+ 	}
+-	instr->ntuples += instr->tuplecount;
++	instr->ntuples += get_tuplecount(instr);
+ 	instr->nloops += 1;
+ 
+ 	/* Reset for next cycle (if any) */
+-	instr->running = false;
++	set_running_false(instr);
+ 	if (instr->need_timer)
+ 	{
+ 		INSTR_TIME_SET_ZERO(instr->starttime);
+ 		INSTR_TIME_SET_ZERO(instr->counter);
+ 		instr->firsttuple = 0;
+ 	}
+-	instr->tuplecount = 0;
++	set_tuplecount(instr, 0);
+ }
+ 
+ #endif							/* INSTRUMENT_H */
