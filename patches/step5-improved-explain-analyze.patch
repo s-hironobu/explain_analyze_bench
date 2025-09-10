@@ -1,23 +1,17 @@
 diff --git a/src/backend/commands/explain.c b/src/backend/commands/explain.c
-index b6a04454ffd..1cb931bc4e8 100644
+index b6a04454ffd..caae15f8a67 100644
 --- a/src/backend/commands/explain.c
 +++ b/src/backend/commands/explain.c
-@@ -1098,12 +1098,13 @@ report_triggers(ResultRelInfo *rInfo, bool show_relname, ExplainState *es)
- 	for (nt = 0; nt < rInfo->ri_TrigDesc->numtriggers; nt++)
- 	{
- 		Trigger    *trig = rInfo->ri_TrigDesc->triggers + nt;
-+		PlanState  *node = rInfo;
- 		Instrumentation *instr = rInfo->ri_TrigInstrument + nt;
- 		char	   *relname;
+@@ -1103,7 +1103,7 @@ report_triggers(ResultRelInfo *rInfo, bool show_relname, ExplainState *es)
  		char	   *conname = NULL;
  
  		/* Must clean up instrumentation state */
 -		InstrEndLoop(instr);
-+		InstrEndLoop(node);
++		InstrEndLoopResultRelInfo(rInfo, instr);
  
  		/*
  		 * We ignore triggers that were never invoked; they likely aren't
-@@ -1824,7 +1825,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
+@@ -1824,7 +1824,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
  	 * auto_explain has to contend with.
  	 */
  	if (planstate->instrument)
@@ -26,7 +20,7 @@ index b6a04454ffd..1cb931bc4e8 100644
  
  	if (es->analyze &&
  		planstate->instrument && planstate->instrument->nloops > 0)
-@@ -4695,7 +4696,7 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
+@@ -4695,7 +4695,7 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
  			uint64_t 	insert_path;
  			uint64_t 	other_path;
  
@@ -35,7 +29,7 @@ index b6a04454ffd..1cb931bc4e8 100644
  
  			/* count the number of source rows */
  			total = outerPlanState(mtstate)->instrument->ntuples;
-@@ -4719,7 +4720,7 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
+@@ -4719,7 +4719,7 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
  			uint64_t 	delete_path;
  			uint64_t 	skipped_path;
  
@@ -44,6 +38,136 @@ index b6a04454ffd..1cb931bc4e8 100644
  
  			/* count the number of source rows */
  			total = outerPlanState(mtstate)->instrument->ntuples;
+diff --git a/src/backend/commands/trigger.c b/src/backend/commands/trigger.c
+index 7dc121f73f1..08168633060 100644
+--- a/src/backend/commands/trigger.c
++++ b/src/backend/commands/trigger.c
+@@ -89,6 +89,7 @@ static bool TriggerEnabled(EState *estate, ResultRelInfo *relinfo,
+ 						   Bitmapset *modifiedCols,
+ 						   TupleTableSlot *oldslot, TupleTableSlot *newslot);
+ static HeapTuple ExecCallTriggerFunc(TriggerData *trigdata,
++									 ResultRelInfo *relInfo,
+ 									 int tgindx,
+ 									 FmgrInfo *finfo,
+ 									 Instrumentation *instr,
+@@ -2306,6 +2307,7 @@ FindTriggerIncompatibleWithInheritance(TriggerDesc *trigdesc)
+  */
+ static HeapTuple
+ ExecCallTriggerFunc(TriggerData *trigdata,
++					ResultRelInfo *relInfo,
+ 					int tgindx,
+ 					FmgrInfo *finfo,
+ 					Instrumentation *instr,
+@@ -2390,8 +2392,8 @@ ExecCallTriggerFunc(TriggerData *trigdata,
+ 	 * If doing EXPLAIN ANALYZE, stop charging time to this trigger, and count
+ 	 * one "tuple returned" (really the number of firings).
+ 	 */
+-	if (instr)
+-		InstrStopNode(instr + tgindx, 1);
++	if (instr && relInfo != NULL)
++		InstrStopNodeTrigger(relInfo, instr + tgindx, 1);
+ 
+ 	return (HeapTuple) DatumGetPointer(result);
+ }
+@@ -2435,6 +2437,7 @@ ExecBSInsertTriggers(EState *estate, ResultRelInfo *relinfo)
+ 
+ 		LocTriggerData.tg_trigger = trigger;
+ 		newtuple = ExecCallTriggerFunc(&LocTriggerData,
++									   relinfo,
+ 									   i,
+ 									   relinfo->ri_TrigFunctions,
+ 									   relinfo->ri_TrigInstrument,
+@@ -2496,6 +2499,7 @@ ExecBRInsertTriggers(EState *estate, ResultRelInfo *relinfo,
+ 		LocTriggerData.tg_trigtuple = oldtuple = newtuple;
+ 		LocTriggerData.tg_trigger = trigger;
+ 		newtuple = ExecCallTriggerFunc(&LocTriggerData,
++									   relinfo,
+ 									   i,
+ 									   relinfo->ri_TrigFunctions,
+ 									   relinfo->ri_TrigInstrument,
+@@ -2591,6 +2595,7 @@ ExecIRInsertTriggers(EState *estate, ResultRelInfo *relinfo,
+ 		LocTriggerData.tg_trigtuple = oldtuple = newtuple;
+ 		LocTriggerData.tg_trigger = trigger;
+ 		newtuple = ExecCallTriggerFunc(&LocTriggerData,
++									   relinfo,
+ 									   i,
+ 									   relinfo->ri_TrigFunctions,
+ 									   relinfo->ri_TrigInstrument,
+@@ -2655,6 +2660,7 @@ ExecBSDeleteTriggers(EState *estate, ResultRelInfo *relinfo)
+ 
+ 		LocTriggerData.tg_trigger = trigger;
+ 		newtuple = ExecCallTriggerFunc(&LocTriggerData,
++									   relinfo,
+ 									   i,
+ 									   relinfo->ri_TrigFunctions,
+ 									   relinfo->ri_TrigInstrument,
+@@ -2765,6 +2771,7 @@ ExecBRDeleteTriggers(EState *estate, EPQState *epqstate,
+ 		LocTriggerData.tg_trigtuple = trigtuple;
+ 		LocTriggerData.tg_trigger = trigger;
+ 		newtuple = ExecCallTriggerFunc(&LocTriggerData,
++									   relinfo,
+ 									   i,
+ 									   relinfo->ri_TrigFunctions,
+ 									   relinfo->ri_TrigInstrument,
+@@ -2860,6 +2867,7 @@ ExecIRDeleteTriggers(EState *estate, ResultRelInfo *relinfo,
+ 		LocTriggerData.tg_trigtuple = trigtuple;
+ 		LocTriggerData.tg_trigger = trigger;
+ 		rettuple = ExecCallTriggerFunc(&LocTriggerData,
++									   relinfo,
+ 									   i,
+ 									   relinfo->ri_TrigFunctions,
+ 									   relinfo->ri_TrigInstrument,
+@@ -2918,6 +2926,7 @@ ExecBSUpdateTriggers(EState *estate, ResultRelInfo *relinfo)
+ 
+ 		LocTriggerData.tg_trigger = trigger;
+ 		newtuple = ExecCallTriggerFunc(&LocTriggerData,
++									   relinfo,
+ 									   i,
+ 									   relinfo->ri_TrigFunctions,
+ 									   relinfo->ri_TrigInstrument,
+@@ -3070,6 +3079,7 @@ ExecBRUpdateTriggers(EState *estate, EPQState *epqstate,
+ 		LocTriggerData.tg_newslot = newslot;
+ 		LocTriggerData.tg_trigger = trigger;
+ 		newtuple = ExecCallTriggerFunc(&LocTriggerData,
++									   relinfo,
+ 									   i,
+ 									   relinfo->ri_TrigFunctions,
+ 									   relinfo->ri_TrigInstrument,
+@@ -3224,6 +3234,7 @@ ExecIRUpdateTriggers(EState *estate, ResultRelInfo *relinfo,
+ 
+ 		LocTriggerData.tg_trigger = trigger;
+ 		newtuple = ExecCallTriggerFunc(&LocTriggerData,
++									   relinfo,
+ 									   i,
+ 									   relinfo->ri_TrigFunctions,
+ 									   relinfo->ri_TrigInstrument,
+@@ -3282,6 +3293,7 @@ ExecBSTruncateTriggers(EState *estate, ResultRelInfo *relinfo)
+ 
+ 		LocTriggerData.tg_trigger = trigger;
+ 		newtuple = ExecCallTriggerFunc(&LocTriggerData,
++									   relinfo,
+ 									   i,
+ 									   relinfo->ri_TrigFunctions,
+ 									   relinfo->ri_TrigInstrument,
+@@ -4543,6 +4555,7 @@ AfterTriggerExecute(EState *estate,
+ 	 * (Don't let ExecCallTriggerFunc measure EXPLAIN time.)
+ 	 */
+ 	rettuple = ExecCallTriggerFunc(&LocTriggerData,
++								   NULL,
+ 								   tgindx,
+ 								   finfo,
+ 								   NULL,
+@@ -4577,8 +4590,8 @@ AfterTriggerExecute(EState *estate,
+ 	 * If doing EXPLAIN ANALYZE, stop charging time to this trigger, and count
+ 	 * one "tuple returned" (really the number of firings).
+ 	 */
+-	if (instr)
+-		InstrStopNode(instr + tgindx, 1);
++	if (instr && relInfo != NULL)
++		InstrStopNodeTrigger(relInfo, instr + tgindx, 1);
+ }
+ 
+ 
 diff --git a/src/backend/executor/execAmi.c b/src/backend/executor/execAmi.c
 index 1d0e8ad57b4..6200d8e995b 100644
 --- a/src/backend/executor/execAmi.c
@@ -416,7 +540,7 @@ index 30a61422329..47edf777b5b 100644
  	return result;
  }
 diff --git a/src/include/executor/instrument.h b/src/include/executor/instrument.h
-index dc809894319..e34461d65ad 100644
+index 80af0040993..d6e18401fc1 100644
 --- a/src/include/executor/instrument.h
 +++ b/src/include/executor/instrument.h
 @@ -15,7 +15,6 @@
@@ -492,7 +616,7 @@ index dc809894319..e34461d65ad 100644
  extern void WalUsageAccumDiff(WalUsage *dst, const WalUsage *add,
  							  const WalUsage *sub);
  
-@@ -159,15 +137,15 @@ InstrStartNode(Instrumentation *instr)
+@@ -159,18 +137,15 @@ InstrStartNode(Instrumentation *instr)
  		instr->walusage_start = pgWalUsage;
  }
  
@@ -503,16 +627,21 @@ index dc809894319..e34461d65ad 100644
 +InstrStopQueryDesc(Instrumentation *instr, uint64_t nTuples)
  {
 -	uint64_t 	save_tuplecount = get_tuplecount(instr);
-+	uint64_t 	save_tuplecount = instr->tuplecount;
- 	instr_time	endtime;
+-	instr_time	endtime;
++	uint64_t        save_tuplecount = instr->tuplecount;
++	instr_time      endtime;
  
- 	/* count the returned tuples */
--	add_tuplecount(instr, nTuples);
+-	/*
+-	 * We omit adding nTuples, as the ExecXX function family already
+-	 * increments nTuples.
+-	 * instr->tuplecount += nTuples;
+-	 */
++	/* count the returned tuples */
 +	instr->tuplecount +=  nTuples;
  
  	/* let's update the time only if the timer was requested */
  	if (instr->need_timer)
-@@ -191,9 +169,9 @@ InstrStopNode(Instrumentation *instr, uint64_t nTuples)
+@@ -194,9 +169,9 @@ InstrStopNode(Instrumentation *instr, uint64_t nTuples)
  						  &pgWalUsage, &instr->walusage_start);
  
  	/* Is this the first tuple of this cycle? */
@@ -524,7 +653,7 @@ index dc809894319..e34461d65ad 100644
  		if (instr->need_timer)
  			instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
  	}
-@@ -208,48 +186,5 @@ InstrStopNode(Instrumentation *instr, uint64_t nTuples)
+@@ -211,48 +186,5 @@ InstrStopNode(Instrumentation *instr, uint64_t nTuples)
  	}
  }
  
@@ -574,7 +703,7 @@ index dc809894319..e34461d65ad 100644
  
  #endif							/* INSTRUMENT_H */
 diff --git a/src/include/nodes/execnodes.h b/src/include/nodes/execnodes.h
-index e107d6e5f81..49e0e0b25dc 100644
+index e107d6e5f81..618843fb459 100644
 --- a/src/include/nodes/execnodes.h
 +++ b/src/include/nodes/execnodes.h
 @@ -522,6 +522,7 @@ typedef struct ResultRelInfo
@@ -595,7 +724,7 @@ index e107d6e5f81..49e0e0b25dc 100644
  	WorkerInstrumentation *worker_instrument;	/* per-worker instrumentation */
  
  	/* Per-worker JIT instrumentation */
-@@ -2930,4 +2933,134 @@ typedef struct LimitState
+@@ -2930,4 +2933,218 @@ typedef struct LimitState
  	TupleTableSlot *last_slot;	/* slot for evaluation of ties */
  } LimitState;
  
@@ -632,15 +761,17 @@ index e107d6e5f81..49e0e0b25dc 100644
 +
 +/* Exit from a plan node */
 +static pg_attribute_always_inline void
-+//InstrStopNode(Instrumentation *instr, uint64_t nTuples)
 +InstrStopNode(PlanState *node, uint64_t nTuples)
 +{
 +	Instrumentation *instr = node->instrument;
 +	uint64_t 	save_tuplecount = get_tuplecount(node);
 +	instr_time	endtime;
 +
-+	/* count the returned tuples */
-+	add_tuplecount(node, nTuples);
++	/*
++	 * We omit adding nTuples, as the ExecXX function family already
++	 * increments nTuples.
++	 * 	add_tuplecount(node, nTuples);
++	 */
 +
 +	/* let's update the time only if the timer was requested */
 +	if (instr->need_timer)
@@ -681,10 +812,56 @@ index e107d6e5f81..49e0e0b25dc 100644
 +	}
 +}
 +
++static pg_attribute_always_inline void
++InstrStopNodeTrigger(ResultRelInfo *relInfo, Instrumentation *instr, uint64_t nTuples)
++{
++	uint64_t		save_tuplecount = get_tuplecount(relInfo);
++	instr_time	endtime;
++
++	/* count the returned tuples */
++	add_tuplecount(relInfo, nTuples);
++	instr->tuplecount = get_tuplecount(relInfo);;
++
++	/* let's update the time only if the timer was requested */
++	if (instr->need_timer)
++	{
++		if (INSTR_TIME_IS_ZERO(instr->starttime))
++			elog(ERROR, "InstrStopNode called without start");
++
++		INSTR_TIME_SET_CURRENT(endtime);
++		INSTR_TIME_ACCUM_DIFF(instr->counter, endtime, instr->starttime);
++
++		INSTR_TIME_SET_ZERO(instr->starttime);
++	}
++
++	/* Add delta of buffer usage since entry to node's totals */
++	if (instr->need_bufusage)
++		BufferUsageAccumDiff(&instr->bufusage,
++							 &pgBufferUsage, &instr->bufusage_start);
++
++	if (instr->need_walusage)
++		WalUsageAccumDiff(&instr->walusage,
++						  &pgWalUsage, &instr->walusage_start);
++
++	/* Is this the first tuple of this cycle? */
++	if (!is_running_true(relInfo))
++	{
++		set_running_true(relInfo);
++		instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
++	}
++	else
++	{
++		/*
++		 * In async mode, if the plan node hadn't emitted any tuples before,
++		 * this might be the first tuple
++		 */
++		if (instr->async_mode && save_tuplecount < 1)
++			instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
++	}
++}
 +
 +/* Update tuple count */
 +static pg_attribute_always_inline void
-+//InstrUpdateTupleCount(Instrumentation *instr, uint64_t nTuples)
 +InstrUpdateTupleCount(PlanState *node, uint64_t nTuples)
 +{
 +	/* count the returned tuples */
@@ -694,7 +871,6 @@ index e107d6e5f81..49e0e0b25dc 100644
 +
 +/* Finish a run cycle for a plan node */
 +static pg_attribute_always_inline void
-+//InstrEndLoop(Instrumentation *instr)
 +InstrEndLoop(PlanState *node)
 +{
 +	double		totaltime;
@@ -727,6 +903,43 @@ index e107d6e5f81..49e0e0b25dc 100644
 +		instr->firsttuple = 0;
 +	}
 +	set_tuplecount(node, 0);
++}
++
++/* Finish a run cycle for a plan node */
++static pg_attribute_always_inline void
++InstrEndLoopResultRelInfo(ResultRelInfo *rInfo, Instrumentation *instr)
++{
++	double		totaltime;
++
++	/* Skip if nothing has happened, or already shut down */
++	if (!instr->running)
++		return;
++
++	if (!INSTR_TIME_IS_ZERO(instr->starttime))
++		elog(ERROR, "InstrEndLoop called on running node");
++
++	/* Accumulate per-cycle statistics into totals */
++	if (instr->need_timer)
++	{
++		totaltime = INSTR_TIME_GET_DOUBLE(instr->counter);
++
++		instr->startup += instr->firsttuple;
++		instr->total += totaltime;
++	}
++	instr->ntuples += get_tuplecount(rInfo);
++	instr->nloops += 1;
++
++	/* Reset for next cycle (if any) */
++	set_running_false(rInfo);
++	instr->running = false;
++	if (instr->need_timer)
++	{
++		INSTR_TIME_SET_ZERO(instr->starttime);
++		INSTR_TIME_SET_ZERO(instr->counter);
++		instr->firsttuple = 0;
++	}
++	set_tuplecount(rInfo, 0);
++	instr->tuplecount = 0;
 +}
 +
  #endif							/* EXECNODES_H */
