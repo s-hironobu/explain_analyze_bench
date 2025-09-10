@@ -2587,7 +2587,7 @@ index 104b059544d..edbc36fc526 100644
   * prototypes from functions in execExpr.c
   */
 diff --git a/src/include/executor/instrument.h b/src/include/executor/instrument.h
-index 7ce1e3b55c1..ecedfaf08e6 100644
+index 7ce1e3b55c1..7585703ac61 100644
 --- a/src/include/executor/instrument.h
 +++ b/src/include/executor/instrument.h
 @@ -78,15 +78,25 @@ typedef struct Instrumentation
@@ -2616,7 +2616,7 @@ index 7ce1e3b55c1..ecedfaf08e6 100644
  	double		nfiltered1;		/* # of tuples removed by scanqual or joinqual */
  	double		nfiltered2;		/* # of tuples removed by "other" quals */
  	BufferUsage bufusage;		/* total buffer usage */
-@@ -131,10 +141,19 @@ InstrStartNode(Instrumentation *instr)
+@@ -131,14 +141,26 @@ InstrStartNode(Instrumentation *instr)
  }
  
  /* Exit from a plan node */
@@ -2635,8 +2635,17 @@ index 7ce1e3b55c1..ecedfaf08e6 100644
 +#endif
  	instr_time	endtime;
  
- 	/* count the returned tuples */
-@@ -174,14 +193,24 @@ InstrStopNode(Instrumentation *instr, double nTuples)
+-	/* count the returned tuples */
+-	instr->tuplecount += nTuples;
++	/*
++	 * We omit adding nTuples, as the ExecXX function family already
++	 * increments nTuples.
++	 * instr->tuplecount += nTuples;
++	 */
+ 
+ 	/* let's update the time only if the timer was requested */
+ 	if (instr->need_timer)
+@@ -174,14 +196,24 @@ InstrStopNode(Instrumentation *instr, double nTuples)
  		 * In async mode, if the plan node hadn't emitted any tuples before,
  		 * this might be the first tuple
  		 */

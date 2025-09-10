@@ -450,7 +450,7 @@ index edbc36fc526..30a61422329 100644
  	return result;
  }
 diff --git a/src/include/executor/instrument.h b/src/include/executor/instrument.h
-index ecedfaf08e6..dc809894319 100644
+index 7585703ac61..80af0040993 100644
 --- a/src/include/executor/instrument.h
 +++ b/src/include/executor/instrument.h
 @@ -66,43 +66,62 @@ typedef enum InstrumentOption
@@ -528,7 +528,7 @@ index ecedfaf08e6..dc809894319 100644
  typedef struct WorkerInstrumentation
  {
  	int			num_workers;	/* # of structures that follow */
-@@ -141,23 +160,14 @@ InstrStartNode(Instrumentation *instr)
+@@ -141,19 +160,10 @@ InstrStartNode(Instrumentation *instr)
  }
  
  /* Exit from a plan node */
@@ -548,13 +548,8 @@ index ecedfaf08e6..dc809894319 100644
 +	uint64_t 	save_tuplecount = get_tuplecount(instr);
  	instr_time	endtime;
  
- 	/* count the returned tuples */
--	instr->tuplecount += nTuples;
-+	add_tuplecount(instr, nTuples);
- 
- 	/* let's update the time only if the timer was requested */
- 	if (instr->need_timer)
-@@ -181,9 +191,9 @@ InstrStopNode(Instrumentation *instr, double nTuples)
+ 	/*
+@@ -184,9 +194,9 @@ InstrStopNode(Instrumentation *instr, double nTuples)
  						  &pgWalUsage, &instr->walusage_start);
  
  	/* Is this the first tuple of this cycle? */
@@ -566,7 +561,7 @@ index ecedfaf08e6..dc809894319 100644
  		if (instr->need_timer)
  			instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
  	}
-@@ -193,27 +203,17 @@ InstrStopNode(Instrumentation *instr, double nTuples)
+@@ -196,27 +206,17 @@ InstrStopNode(Instrumentation *instr, double nTuples)
  		 * In async mode, if the plan node hadn't emitted any tuples before,
  		 * this might be the first tuple
  		 */
@@ -595,7 +590,7 @@ index ecedfaf08e6..dc809894319 100644
  }
  
  
-@@ -224,7 +224,7 @@ InstrEndLoop(Instrumentation *instr)
+@@ -227,7 +227,7 @@ InstrEndLoop(Instrumentation *instr)
  	double		totaltime;
  
  	/* Skip if nothing has happened, or already shut down */
@@ -604,7 +599,7 @@ index ecedfaf08e6..dc809894319 100644
  		return;
  
  	if (!INSTR_TIME_IS_ZERO(instr->starttime))
-@@ -238,18 +238,18 @@ InstrEndLoop(Instrumentation *instr)
+@@ -241,18 +241,18 @@ InstrEndLoop(Instrumentation *instr)
  		instr->startup += instr->firsttuple;
  		instr->total += totaltime;
  	}
