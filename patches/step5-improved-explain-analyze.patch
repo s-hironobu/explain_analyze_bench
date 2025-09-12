@@ -3262,7 +3262,7 @@ index 03653ab6c6c..d6e18401fc1 100644
 +
  #endif							/* INSTRUMENT_H */
 diff --git a/src/include/nodes/execnodes.h b/src/include/nodes/execnodes.h
-index e107d6e5f81..bbe2f091792 100644
+index e107d6e5f81..8737d6214d5 100644
 --- a/src/include/nodes/execnodes.h
 +++ b/src/include/nodes/execnodes.h
 @@ -522,6 +522,7 @@ typedef struct ResultRelInfo
@@ -3283,7 +3283,7 @@ index e107d6e5f81..bbe2f091792 100644
  	WorkerInstrumentation *worker_instrument;	/* per-worker instrumentation */
  
  	/* Per-worker JIT instrumentation */
-@@ -2930,4 +2933,263 @@ typedef struct LimitState
+@@ -2930,4 +2933,260 @@ typedef struct LimitState
  	TupleTableSlot *last_slot;	/* slot for evaluation of ties */
  } LimitState;
  
@@ -3316,15 +3316,12 @@ index e107d6e5f81..bbe2f091792 100644
 +#define set_prev_running_true(node)     ((node)->hot_instr |= PREV_RUNNING_MASK)
 +#define set_prev_running_false(node)    ((node)->hot_instr &= ~PREV_RUNNING_MASK)
 +
-+
 +/* set prev_running from current running value */
-+#define set_prev_running(node)     do { \
-+		if (is_running_true(node)) {	\
-+			set_prev_running_true(node);		\
-+		} else {								\
-+			set_prev_running_false(node);		\
-+		}										\
-+} while(0)
++//#define set_prev_running(node)										\
++//	(node)->hot_instr = ((node)->hot_instr & ~(1ULL << PREV_RUNNING_BIT)) \
++//		| (((node)->hot_instr >> 1) & (1ULL << PREV_RUNNING_BIT))
++#define set_prev_running(node) \
++	((node)->hot_instr ^= (((node)->hot_instr ^ ((node)->hot_instr >> 1)) & (1ULL << PREV_RUNNING_BIT)))
 +
 +/* overflow check flag operations */
 +#define is_overflow_check_true(node)   (((node)->hot_instr & OVERFLOW_CHECK_MASK) != 0)

@@ -2679,7 +2679,7 @@ index f6379c35d2f..c01016af726 100644
  
  
 diff --git a/src/include/executor/executor.h b/src/include/executor/executor.h
-index 104b059544d..2f2ce5c8adc 100644
+index 104b059544d..593974b80aa 100644
 --- a/src/include/executor/executor.h
 +++ b/src/include/executor/executor.h
 @@ -296,7 +296,6 @@ extern void ExecEndNode(PlanState *node);
@@ -2716,7 +2716,7 @@ index 104b059544d..2f2ce5c8adc 100644
 +	if (!instr)
 +		return result;
 +
-+	set_prev_running(node);
++	set_prev_running(instr);
 +	current = instr->hot_instr;
 +
 +	if (!TupIsNull(result))
@@ -2740,10 +2740,10 @@ index 104b059544d..2f2ce5c8adc 100644
   * prototypes from functions in execExpr.c
   */
 diff --git a/src/include/executor/instrument.h b/src/include/executor/instrument.h
-index 03653ab6c6c..71f017f6cfa 100644
+index 03653ab6c6c..a342a33bf07 100644
 --- a/src/include/executor/instrument.h
 +++ b/src/include/executor/instrument.h
-@@ -66,33 +66,106 @@ typedef enum InstrumentOption
+@@ -66,33 +66,103 @@ typedef enum InstrumentOption
  	INSTRUMENT_ALL = PG_INT32_MAX
  } InstrumentOption;
  
@@ -2805,15 +2805,12 @@ index 03653ab6c6c..71f017f6cfa 100644
 +#define set_prev_running_true(instr)     ((instr)->hot_instr |= PREV_RUNNING_MASK)
 +#define set_prev_running_false(instr)    ((instr)->hot_instr &= ~PREV_RUNNING_MASK)
 +
++//#define set_prev_running(instr)										\
++//	(instr)->hot_instr = ((instr)->hot_instr & ~(1ULL << PREV_RUNNING_BIT)) \
++//		| (((instr)->hot_instr >> 1) & (1ULL << PREV_RUNNING_BIT))
 +
-+/* set prev_running from current running value */
-+#define set_prev_running(instr)     do { \
-+		if (is_running_true(instr)) {	\
-+			set_prev_running_true(instr);		\
-+		} else {								\
-+			set_prev_running_false(instr);		\
-+		}										\
-+} while(0)
++#define set_prev_running(instr) \
++	((instr)->hot_instr ^= (((instr)->hot_instr ^ ((instr)->hot_instr >> 1)) & (1ULL << PREV_RUNNING_BIT)))
 +
 +/* overflow check flag operations */
 +#define is_overflow_check_true(instr)   (((instr)->hot_instr & OVERFLOW_CHECK_MASK) != 0)
@@ -2855,7 +2852,7 @@ index 03653ab6c6c..71f017f6cfa 100644
  typedef struct WorkerInstrumentation
  {
  	int			num_workers;	/* # of structures that follow */
-@@ -105,10 +178,6 @@ extern PGDLLIMPORT WalUsage pgWalUsage;
+@@ -105,10 +175,6 @@ extern PGDLLIMPORT WalUsage pgWalUsage;
  extern Instrumentation *InstrAlloc(int n, int instrument_options,
  								   bool async_mode);
  extern void InstrInit(Instrumentation *instr, int instrument_options);
@@ -2866,7 +2863,7 @@ index 03653ab6c6c..71f017f6cfa 100644
  extern void InstrAggNode(Instrumentation *dst, Instrumentation *add);
  extern void InstrStartParallelQuery(void);
  extern void InstrEndParallelQuery(BufferUsage *bufusage, WalUsage *walusage);
-@@ -118,4 +187,120 @@ extern void BufferUsageAccumDiff(BufferUsage *dst,
+@@ -118,4 +184,120 @@ extern void BufferUsageAccumDiff(BufferUsage *dst,
  extern void WalUsageAccumDiff(WalUsage *dst, const WalUsage *add,
  							  const WalUsage *sub);
  
