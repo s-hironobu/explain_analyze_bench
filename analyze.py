@@ -153,7 +153,8 @@ if __name__ == "__main__":
         ["Step 1", BASE_DIR + "/step1.log"],
         ["Step 2", BASE_DIR + "/step2.log"],
         ["Step 3", BASE_DIR + "/step3.log"],
-        # ["Step 3 (LongLongInt)", BASE_DIR + "/step3-longlongint.log"],
+        ["Step 4", BASE_DIR + "/step4.log"],
+        ["Step 5", BASE_DIR + "/step5.log"],
     ]
 
     displayHeader()
