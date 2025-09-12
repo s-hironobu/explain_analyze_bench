@@ -2679,7 +2679,7 @@ index f6379c35d2f..c01016af726 100644
  
  
 diff --git a/src/include/executor/executor.h b/src/include/executor/executor.h
-index 104b059544d..30a61422329 100644
+index 104b059544d..2f2ce5c8adc 100644
 --- a/src/include/executor/executor.h
 +++ b/src/include/executor/executor.h
 @@ -296,7 +296,6 @@ extern void ExecEndNode(PlanState *node);
@@ -2690,7 +2690,7 @@ index 104b059544d..30a61422329 100644
  /* ----------------------------------------------------------------
   *		ExecProcNode
   *
-@@ -314,6 +313,46 @@ ExecProcNode(PlanState *node)
+@@ -314,6 +313,48 @@ ExecProcNode(PlanState *node)
  }
  #endif
  
@@ -2716,9 +2716,11 @@ index 104b059544d..30a61422329 100644
 +	if (!instr)
 +		return result;
 +
++	set_prev_running(node);
 +	current = instr->hot_instr;
 +
 +	if (!TupIsNull(result))
++		/* TODO: Prevent overflow */
 +		/* Increment tuplecount  + running = true */
 +		current = ((current + 1) & TUPLECOUNT_MASK) | RUNNING_MASK;
 +	else
@@ -2738,10 +2740,10 @@ index 104b059544d..30a61422329 100644
   * prototypes from functions in execExpr.c
   */
 diff --git a/src/include/executor/instrument.h b/src/include/executor/instrument.h
-index 03653ab6c6c..80af0040993 100644
+index 03653ab6c6c..71f017f6cfa 100644
 --- a/src/include/executor/instrument.h
 +++ b/src/include/executor/instrument.h
-@@ -66,33 +66,62 @@ typedef enum InstrumentOption
+@@ -66,33 +66,106 @@ typedef enum InstrumentOption
  	INSTRUMENT_ALL = PG_INT32_MAX
  } InstrumentOption;
  
@@ -2784,32 +2786,76 @@ index 03653ab6c6c..80af0040993 100644
 + */
 +/* bit definition */
 +#define RUNNING_BIT         63
-+#define RUNNING_MASK        (1ULL << RUNNING_BIT)
-+#define TUPLECOUNT_MASK     (~RUNNING_MASK)
-+#define MAX_TUPLECOUNT      ((1ULL << 63) - 1)
++#define PREV_RUNNING_BIT    62
++#define OVERFLOW_CHECK_BIT  61
 +
-+/* running flag operation */
++#define RUNNING_MASK        (1ULL << RUNNING_BIT)
++#define PREV_RUNNING_MASK   (1ULL << PREV_RUNNING_BIT)
++#define OVERFLOW_CHECK_MASK (1ULL << OVERFLOW_CHECK_BIT)
++#define TUPLECOUNT_MASK     ((1ULL << 61) - 1)  // 0-60bit mask
++#define MAX_TUPLECOUNT      ((1ULL << 61) - 1)   // maximum number of 61bit
++
++/* running flag operations */
 +#define is_running_true(instr)      (((instr)->hot_instr & RUNNING_MASK) != 0)
 +#define set_running_true(instr)     ((instr)->hot_instr |= RUNNING_MASK)
-+#define set_running_false(instr)    ((instr)->hot_instr &= TUPLECOUNT_MASK)
++#define set_running_false(instr)    ((instr)->hot_instr &= ~RUNNING_MASK)
 +
-+/* tuplecount operation */
++/* prev_running flag operations */
++#define is_prev_running_true(instr) (((instr)->hot_instr & PREV_RUNNING_MASK) != 0)
++#define set_prev_running_true(instr)     ((instr)->hot_instr |= PREV_RUNNING_MASK)
++#define set_prev_running_false(instr)    ((instr)->hot_instr &= ~PREV_RUNNING_MASK)
++
++
++/* set prev_running from current running value */
++#define set_prev_running(instr)     do { \
++		if (is_running_true(instr)) {	\
++			set_prev_running_true(instr);		\
++		} else {								\
++			set_prev_running_false(instr);		\
++		}										\
++} while(0)
++
++/* overflow check flag operations */
++#define is_overflow_check_true(instr)   (((instr)->hot_instr & OVERFLOW_CHECK_MASK) != 0)
++#define set_overflow_check_true(instr)  ((instr)->hot_instr |= OVERFLOW_CHECK_MASK)
++#define set_overflow_check_false(instr) ((instr)->hot_instr &= ~OVERFLOW_CHECK_MASK)
++
++/* tuplecount operations */
 +#define get_tuplecount(instr)       ((instr)->hot_instr & TUPLECOUNT_MASK)
 +#define set_tuplecount(instr, n)    do { \
-+		(instr)->hot_instr = ((instr)->hot_instr & RUNNING_MASK) | ((n) & TUPLECOUNT_MASK); \
++		uint64_t status_bits = (instr)->hot_instr & ~TUPLECOUNT_MASK;	\
++		(instr)->hot_instr = status_bits | ((n) & TUPLECOUNT_MASK);		\
 +} while(0)
 +
 +#define add_tuplecount(instr, n)    do { \
-+		uint64_t current = get_tuplecount(instr);						\
-+	uint64_t new_count = (current + (n)) & TUPLECOUNT_MASK;				\
-+	(instr)->hot_instr = ((instr)->hot_instr & RUNNING_MASK) | new_count; \
++		if (!is_overflow_check_true(instr)) {	 \
++			uint64_t current = get_tuplecount(instr);	\
++			uint64_t new_count = current + (n);			\
++			if (new_count > MAX_TUPLECOUNT) {			\
++				set_overflow_check_true(instr);			\
++				set_tuplecount(instr, MAX_TUPLECOUNT);	\
++			} else {									\
++				set_tuplecount(instr, new_count);		\
++			}											\
++		}												\
++} while(0)
++
++#define clear_all_flags(instr)      do { \
++		set_running_false(instr);		\
++		set_prev_running_false(instr);	\
++		set_overflow_check_false(instr); \
++} while(0)
++
++#define reset_tuplecount(instr)     do { \
++		set_tuplecount(instr, 0);		\
++		set_overflow_check_false(instr); \
 +} while(0)
 +
 +
  typedef struct WorkerInstrumentation
  {
  	int			num_workers;	/* # of structures that follow */
-@@ -105,10 +134,6 @@ extern PGDLLIMPORT WalUsage pgWalUsage;
+@@ -105,10 +178,6 @@ extern PGDLLIMPORT WalUsage pgWalUsage;
  extern Instrumentation *InstrAlloc(int n, int instrument_options,
  								   bool async_mode);
  extern void InstrInit(Instrumentation *instr, int instrument_options);
@@ -2820,7 +2866,7 @@ index 03653ab6c6c..80af0040993 100644
  extern void InstrAggNode(Instrumentation *dst, Instrumentation *add);
  extern void InstrStartParallelQuery(void);
  extern void InstrEndParallelQuery(BufferUsage *bufusage, WalUsage *walusage);
-@@ -118,4 +143,116 @@ extern void BufferUsageAccumDiff(BufferUsage *dst,
+@@ -118,4 +187,120 @@ extern void BufferUsageAccumDiff(BufferUsage *dst,
  extern void WalUsageAccumDiff(WalUsage *dst, const WalUsage *add,
  							  const WalUsage *sub);
  
@@ -2875,9 +2921,13 @@ index 03653ab6c6c..80af0040993 100644
 +						  &pgWalUsage, &instr->walusage_start);
 +
 +	/* Is this the first tuple of this cycle? */
-+	if (!is_running_true(instr))
++	if (!is_prev_running_true(instr))
 +	{
-+		set_running_true(instr);
++		/*--
++		 * We omit setting running to true, as the ExecXX function family
++		 * already set.
++		 * set_running_true(instr);
++		*/
 +		if (instr->need_timer)
 +			instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
 +	}
