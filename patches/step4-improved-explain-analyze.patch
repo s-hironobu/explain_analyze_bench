@@ -277,7 +277,7 @@ index 0391798dd2c..740a0b64758 100644
  
  	/*
 diff --git a/src/backend/executor/execProcnode.c b/src/backend/executor/execProcnode.c
-index f5f9cfbeead..19a1f6d0321 100644
+index f5f9cfbeead..58e0015e0fa 100644
 --- a/src/backend/executor/execProcnode.c
 +++ b/src/backend/executor/execProcnode.c
 @@ -121,6 +121,9 @@
@@ -290,7 +290,7 @@ index f5f9cfbeead..19a1f6d0321 100644
  static bool ExecShutdownNode_walker(PlanState *node, void *context);
  
  
-@@ -462,7 +465,36 @@ ExecProcNodeFirst(PlanState *node)
+@@ -462,7 +465,42 @@ ExecProcNodeFirst(PlanState *node)
  	 * have ExecProcNode() directly call the relevant function from now on.
  	 */
  	if (node->instrument)
@@ -307,9 +307,15 @@ index f5f9cfbeead..19a1f6d0321 100644
 +		 */
 +		if (node->instrument->need_timer || node->instrument->need_bufusage
 +			|| node->instrument->need_walusage)
++		{
++			set_shortcut_false(node->instrument);
 +			node->ExecProcNode = ExecProcNodeInstr;
++		}
 +		else
++		{
++			set_shortcut_true(node->instrument);
 +			node->ExecProcNode = node->ExecProcNodeReal;
++		}
 +#else
 +		/*--
 +		 * Use ExecProcNodeInstrLite() to avoid calling InstrStartNode()
@@ -328,7 +334,7 @@ index f5f9cfbeead..19a1f6d0321 100644
  	else
  		node->ExecProcNode = node->ExecProcNodeReal;
  
-@@ -484,10 +516,39 @@ ExecProcNodeInstr(PlanState *node)
+@@ -484,10 +522,39 @@ ExecProcNodeInstr(PlanState *node)
  
  	result = node->ExecProcNodeReal(node);
  
@@ -369,7 +375,7 @@ index f5f9cfbeead..19a1f6d0321 100644
  
  
  /* ----------------------------------------------------------------
-@@ -792,7 +853,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
+@@ -792,7 +859,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
  	 * has never been executed, so as to avoid incorrectly making it appear
  	 * that it has.
  	 */
@@ -378,7 +384,7 @@ index f5f9cfbeead..19a1f6d0321 100644
  		InstrStartNode(node->instrument);
  
  	planstate_tree_walker(node, ExecShutdownNode_walker, context);
-@@ -822,7 +883,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
+@@ -822,7 +889,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
  	}
  
  	/* Stop the node if we started it above, reporting 0 tuples. */
@@ -2679,7 +2685,7 @@ index f6379c35d2f..c01016af726 100644
  
  
 diff --git a/src/include/executor/executor.h b/src/include/executor/executor.h
-index 104b059544d..593974b80aa 100644
+index 104b059544d..cb48bb2a797 100644
 --- a/src/include/executor/executor.h
 +++ b/src/include/executor/executor.h
 @@ -296,7 +296,6 @@ extern void ExecEndNode(PlanState *node);
@@ -2690,7 +2696,7 @@ index 104b059544d..593974b80aa 100644
  /* ----------------------------------------------------------------
   *		ExecProcNode
   *
-@@ -314,6 +313,48 @@ ExecProcNode(PlanState *node)
+@@ -314,6 +313,49 @@ ExecProcNode(PlanState *node)
  }
  #endif
  
@@ -2712,17 +2718,18 @@ index 104b059544d..593974b80aa 100644
 +	uint64_t current;
 +	Instrumentation *instr = node->instrument;
 +
-+	/* Most common case: no instrumentation */
++	/* Most common case: no instrumentation or no shortcut */
 +	if (!instr)
 +		return result;
++	if (is_shortcut_false(instr))
++		return result;
 +
-+	set_prev_running(instr);
 +	current = instr->hot_instr;
 +
 +	if (!TupIsNull(result))
 +		/* TODO: Prevent overflow */
 +		/* Increment tuplecount  + running = true */
-+		current = ((current + 1) & TUPLECOUNT_MASK) | RUNNING_MASK;
++		current = ((current + 1) & TUPLECOUNT_MASK) | (current & (SHORTCUT_MASK | RUNNING_MASK)) | RUNNING_MASK;
 +	else
 +		/* running = true */
 +		current |= RUNNING_MASK;
@@ -2740,17 +2747,17 @@ index 104b059544d..593974b80aa 100644
   * prototypes from functions in execExpr.c
   */
 diff --git a/src/include/executor/instrument.h b/src/include/executor/instrument.h
-index 03653ab6c6c..a342a33bf07 100644
+index 03653ab6c6c..3c892b9cd3a 100644
 --- a/src/include/executor/instrument.h
 +++ b/src/include/executor/instrument.h
-@@ -66,33 +66,103 @@ typedef enum InstrumentOption
+@@ -66,33 +66,67 @@ typedef enum InstrumentOption
  	INSTRUMENT_ALL = PG_INT32_MAX
  } InstrumentOption;
  
 +
  typedef struct Instrumentation
  {
-+	uint64_t    hot_instr;		/* bit 0: running, bit 1-63: tuplecount */
++	uint64_t    hot_instr;		/* bit 63: shortcut, bit 62: running, bit 0-61: tuplecount */
 +
  	/* Parameters set at node creation: */
  	bool		need_timer;		/* true if we need timer data */
@@ -2785,74 +2792,38 @@ index 03653ab6c6c..a342a33bf07 100644
 + * For hot_instr in Instrumentation
 + */
 +/* bit definition */
-+#define RUNNING_BIT         63
-+#define PREV_RUNNING_BIT    62
-+#define OVERFLOW_CHECK_BIT  61
++#define SHORTCUT_BIT   63
++#define RUNNING_BIT    62
 +
-+#define RUNNING_MASK        (1ULL << RUNNING_BIT)
-+#define PREV_RUNNING_MASK   (1ULL << PREV_RUNNING_BIT)
-+#define OVERFLOW_CHECK_MASK (1ULL << OVERFLOW_CHECK_BIT)
-+#define TUPLECOUNT_MASK     ((1ULL << 61) - 1)  // 0-60bit mask
-+#define MAX_TUPLECOUNT      ((1ULL << 61) - 1)   // maximum number of 61bit
++#define SHORTCUT_MASK  (1ULL << SHORTCUT_BIT)
++#define RUNNING_MASK   (1ULL << RUNNING_BIT)
++#define TUPLECOUNT_MASK ((1ULL << RUNNING_BIT) - 1)  //(0..61)
 +
-+/* running flag operations */
-+#define is_running_true(instr)      (((instr)->hot_instr & RUNNING_MASK) != 0)
-+#define set_running_true(instr)     ((instr)->hot_instr |= RUNNING_MASK)
-+#define set_running_false(instr)    ((instr)->hot_instr &= ~RUNNING_MASK)
++// shortcut
++#define is_shortcut_true(node)    (((node)->hot_instr & SHORTCUT_MASK) != 0)
++#define is_shortcut_false(node)   (((node)->hot_instr & SHORTCUT_MASK) == 0)
++#define set_shortcut_true(node)   ((node)->hot_instr |= SHORTCUT_MASK)
++#define set_shortcut_false(node)  ((node)->hot_instr &= ~SHORTCUT_MASK)
 +
-+/* prev_running flag operations */
-+#define is_prev_running_true(instr) (((instr)->hot_instr & PREV_RUNNING_MASK) != 0)
-+#define set_prev_running_true(instr)     ((instr)->hot_instr |= PREV_RUNNING_MASK)
-+#define set_prev_running_false(instr)    ((instr)->hot_instr &= ~PREV_RUNNING_MASK)
++// running
++#define is_running_true(instr)    (((instr)->hot_instr & RUNNING_MASK) != 0)
++#define is_running_false(instr)   (((instr)->hot_instr & RUNNING_MASK) == 0)
++#define set_running_true(instr)   ((instr)->hot_instr |= RUNNING_MASK)
++#define set_running_false(instr)  ((instr)->hot_instr &= ~RUNNING_MASK)
 +
-+//#define set_prev_running(instr)										\
-+//	(instr)->hot_instr = ((instr)->hot_instr & ~(1ULL << PREV_RUNNING_BIT)) \
-+//		| (((instr)->hot_instr >> 1) & (1ULL << PREV_RUNNING_BIT))
-+
-+#define set_prev_running(instr) \
-+	((instr)->hot_instr ^= (((instr)->hot_instr ^ ((instr)->hot_instr >> 1)) & (1ULL << PREV_RUNNING_BIT)))
-+
-+/* overflow check flag operations */
-+#define is_overflow_check_true(instr)   (((instr)->hot_instr & OVERFLOW_CHECK_MASK) != 0)
-+#define set_overflow_check_true(instr)  ((instr)->hot_instr |= OVERFLOW_CHECK_MASK)
-+#define set_overflow_check_false(instr) ((instr)->hot_instr &= ~OVERFLOW_CHECK_MASK)
-+
-+/* tuplecount operations */
-+#define get_tuplecount(instr)       ((instr)->hot_instr & TUPLECOUNT_MASK)
-+#define set_tuplecount(instr, n)    do { \
-+		uint64_t status_bits = (instr)->hot_instr & ~TUPLECOUNT_MASK;	\
-+		(instr)->hot_instr = status_bits | ((n) & TUPLECOUNT_MASK);		\
-+} while(0)
-+
-+#define add_tuplecount(instr, n)    do { \
-+		if (!is_overflow_check_true(instr)) {	 \
-+			uint64_t current = get_tuplecount(instr);	\
-+			uint64_t new_count = current + (n);			\
-+			if (new_count > MAX_TUPLECOUNT) {			\
-+				set_overflow_check_true(instr);			\
-+				set_tuplecount(instr, MAX_TUPLECOUNT);	\
-+			} else {									\
-+				set_tuplecount(instr, new_count);		\
-+			}											\
-+		}												\
-+} while(0)
-+
-+#define clear_all_flags(instr)      do { \
-+		set_running_false(instr);		\
-+		set_prev_running_false(instr);	\
-+		set_overflow_check_false(instr); \
-+} while(0)
-+
-+#define reset_tuplecount(instr)     do { \
-+		set_tuplecount(instr, 0);		\
-+		set_overflow_check_false(instr); \
-+} while(0)
++// tuplecount
++#define get_tuplecount(instr)     ((instr)->hot_instr & TUPLECOUNT_MASK)
++#define set_tuplecount(instr, n)  \
++	((instr)->hot_instr = ((instr)->hot_instr & ~TUPLECOUNT_MASK) | ((n) & TUPLECOUNT_MASK))
++#define add_tuplecount(instr, n)  \
++	((instr)->hot_instr = ((instr)->hot_instr & ~TUPLECOUNT_MASK) |		\
++	 (((instr)->hot_instr + (n)) & TUPLECOUNT_MASK))
 +
 +
  typedef struct WorkerInstrumentation
  {
  	int			num_workers;	/* # of structures that follow */
-@@ -105,10 +175,6 @@ extern PGDLLIMPORT WalUsage pgWalUsage;
+@@ -105,10 +139,6 @@ extern PGDLLIMPORT WalUsage pgWalUsage;
  extern Instrumentation *InstrAlloc(int n, int instrument_options,
  								   bool async_mode);
  extern void InstrInit(Instrumentation *instr, int instrument_options);
@@ -2863,7 +2834,7 @@ index 03653ab6c6c..a342a33bf07 100644
  extern void InstrAggNode(Instrumentation *dst, Instrumentation *add);
  extern void InstrStartParallelQuery(void);
  extern void InstrEndParallelQuery(BufferUsage *bufusage, WalUsage *walusage);
-@@ -118,4 +184,120 @@ extern void BufferUsageAccumDiff(BufferUsage *dst,
+@@ -118,4 +148,112 @@ extern void BufferUsageAccumDiff(BufferUsage *dst,
  extern void WalUsageAccumDiff(WalUsage *dst, const WalUsage *add,
  							  const WalUsage *sub);
  
@@ -2890,11 +2861,7 @@ index 03653ab6c6c..a342a33bf07 100644
 +	uint64_t 	save_tuplecount = get_tuplecount(instr);
 +	instr_time	endtime;
 +
-+	/*
-+	 * We omit adding nTuples, as the ExecXX function family already
-+	 * increments nTuples.
-+	 * instr->tuplecount += nTuples;
-+	 */
++	add_tuplecount(instr, nTuples);
 +
 +	/* let's update the time only if the timer was requested */
 +	if (instr->need_timer)
@@ -2918,13 +2885,9 @@ index 03653ab6c6c..a342a33bf07 100644
 +						  &pgWalUsage, &instr->walusage_start);
 +
 +	/* Is this the first tuple of this cycle? */
-+	if (!is_prev_running_true(instr))
++	if (!is_running_true(instr))
 +	{
-+		/*--
-+		 * We omit setting running to true, as the ExecXX function family
-+		 * already set.
-+		 * set_running_true(instr);
-+		*/
++		set_running_true(instr);
 +		if (instr->need_timer)
 +			instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
 +	}
