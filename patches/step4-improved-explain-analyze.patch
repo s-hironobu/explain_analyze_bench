@@ -277,10 +277,10 @@ index 0391798dd2c..740a0b64758 100644
  
  	/*
 diff --git a/src/backend/executor/execProcnode.c b/src/backend/executor/execProcnode.c
-index f5f9cfbeead..58e0015e0fa 100644
+index f5f9cfbeead..54835a6f1c7 100644
 --- a/src/backend/executor/execProcnode.c
 +++ b/src/backend/executor/execProcnode.c
-@@ -121,6 +121,9 @@
+@@ -121,9 +121,11 @@
  
  static TupleTableSlot *ExecProcNodeFirst(PlanState *node);
  static TupleTableSlot *ExecProcNodeInstr(PlanState *node);
@@ -289,8 +289,11 @@ index f5f9cfbeead..58e0015e0fa 100644
 +#endif
  static bool ExecShutdownNode_walker(PlanState *node, void *context);
  
- 
-@@ -462,7 +465,42 @@ ExecProcNodeFirst(PlanState *node)
+-
+ /* ------------------------------------------------------------------------
+  *		ExecInitNode
+  *
+@@ -462,7 +464,42 @@ ExecProcNodeFirst(PlanState *node)
  	 * have ExecProcNode() directly call the relevant function from now on.
  	 */
  	if (node->instrument)
@@ -334,7 +337,7 @@ index f5f9cfbeead..58e0015e0fa 100644
  	else
  		node->ExecProcNode = node->ExecProcNodeReal;
  
-@@ -484,10 +522,39 @@ ExecProcNodeInstr(PlanState *node)
+@@ -484,10 +521,39 @@ ExecProcNodeInstr(PlanState *node)
  
  	result = node->ExecProcNodeReal(node);
  
@@ -375,7 +378,7 @@ index f5f9cfbeead..58e0015e0fa 100644
  
  
  /* ----------------------------------------------------------------
-@@ -792,7 +859,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
+@@ -792,7 +858,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
  	 * has never been executed, so as to avoid incorrectly making it appear
  	 * that it has.
  	 */
@@ -384,7 +387,7 @@ index f5f9cfbeead..58e0015e0fa 100644
  		InstrStartNode(node->instrument);
  
  	planstate_tree_walker(node, ExecShutdownNode_walker, context);
-@@ -822,7 +889,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
+@@ -822,7 +888,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
  	}
  
  	/* Stop the node if we started it above, reporting 0 tuples. */
@@ -2685,7 +2688,7 @@ index f6379c35d2f..c01016af726 100644
  
  
 diff --git a/src/include/executor/executor.h b/src/include/executor/executor.h
-index 104b059544d..cb48bb2a797 100644
+index 104b059544d..9e6a86a7374 100644
 --- a/src/include/executor/executor.h
 +++ b/src/include/executor/executor.h
 @@ -296,7 +296,6 @@ extern void ExecEndNode(PlanState *node);
@@ -2728,11 +2731,11 @@ index 104b059544d..cb48bb2a797 100644
 +
 +	if (!TupIsNull(result))
 +		/* TODO: Prevent overflow */
-+		/* Increment tuplecount  + running = true */
-+		current = ((current + 1) & TUPLECOUNT_MASK) | (current & (SHORTCUT_MASK | RUNNING_MASK)) | RUNNING_MASK;
-+	else
-+		/* running = true */
-+		current |= RUNNING_MASK;
++		/* Increment tuplecount++ */
++		current = ((current + 1) & TUPLECOUNT_MASK) | (current & (SHORTCUT_MASK | RUNNING_MASK));
++
++	/* running = true */
++	current |= RUNNING_MASK;
 +
 +	/* store current */
 +	instr->hot_instr = current;

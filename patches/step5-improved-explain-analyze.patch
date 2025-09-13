@@ -3071,7 +3071,7 @@ index 86db3dc8d0d..e1aac4c6d27 100644
  	struct Instrumentation *totaltime;	/* total time spent in ExecutorRun */
  } QueryDesc;
 diff --git a/src/include/executor/executor.h b/src/include/executor/executor.h
-index 104b059544d..146d1e06947 100644
+index 104b059544d..8446b8c145d 100644
 --- a/src/include/executor/executor.h
 +++ b/src/include/executor/executor.h
 @@ -296,7 +296,6 @@ extern void ExecEndNode(PlanState *node);
@@ -3109,10 +3109,10 @@ index 104b059544d..146d1e06947 100644
 +	if (!TupIsNull(result))
 +		/* TODO: Prevent overflow */
 +		/* Increment tuplecount  + running = true */
-+		current = ((current + 1) & TUPLECOUNT_MASK) | (current & (SHORTCUT_MASK | RUNNING_MASK)) | RUNNING_MASK;
-+	else
-+		/* running = true */
-+		current |= RUNNING_MASK;
++		current = ((current + 1) & TUPLECOUNT_MASK) | (current & (SHORTCUT_MASK | RUNNING_MASK));
++
++	/* running = true */
++	current |= RUNNING_MASK;
 +
 +	/* store current */
 +	node->hot_instr = current;
