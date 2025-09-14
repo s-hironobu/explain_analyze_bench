@@ -284,7 +284,7 @@ index 0391798dd2c..740a0b64758 100644
  
  	/*
 diff --git a/src/backend/executor/execProcnode.c b/src/backend/executor/execProcnode.c
-index f5f9cfbeead..a274178beb3 100644
+index f5f9cfbeead..387dd19fdc8 100644
 --- a/src/backend/executor/execProcnode.c
 +++ b/src/backend/executor/execProcnode.c
 @@ -121,6 +121,9 @@
@@ -297,7 +297,7 @@ index f5f9cfbeead..a274178beb3 100644
  static bool ExecShutdownNode_walker(PlanState *node, void *context);
  
  
-@@ -462,7 +465,36 @@ ExecProcNodeFirst(PlanState *node)
+@@ -462,7 +465,42 @@ ExecProcNodeFirst(PlanState *node)
  	 * have ExecProcNode() directly call the relevant function from now on.
  	 */
  	if (node->instrument)
@@ -314,9 +314,15 @@ index f5f9cfbeead..a274178beb3 100644
 +		 */
 +		if (node->instrument->need_timer || node->instrument->need_bufusage
 +			|| node->instrument->need_walusage)
++		{
++			node->instrument->shortcut = false;
 +			node->ExecProcNode = ExecProcNodeInstr;
++		}
 +		else
++		{
++			node->instrument->shortcut = true;
 +			node->ExecProcNode = node->ExecProcNodeReal;
++		}
 +#else
 +		/*--
 +		 * Use ExecProcNodeInstrLite() to avoid calling InstrStartNode()
@@ -335,7 +341,7 @@ index f5f9cfbeead..a274178beb3 100644
  	else
  		node->ExecProcNode = node->ExecProcNodeReal;
  
-@@ -484,10 +516,43 @@ ExecProcNodeInstr(PlanState *node)
+@@ -484,10 +522,43 @@ ExecProcNodeInstr(PlanState *node)
  
  	result = node->ExecProcNodeReal(node);
  
@@ -2650,7 +2656,7 @@ index f6379c35d2f..c01016af726 100644
  
  
 diff --git a/src/include/executor/executor.h b/src/include/executor/executor.h
-index 104b059544d..edbc36fc526 100644
+index 104b059544d..41481bd08bd 100644
 --- a/src/include/executor/executor.h
 +++ b/src/include/executor/executor.h
 @@ -296,7 +296,6 @@ extern void ExecEndNode(PlanState *node);
@@ -2661,7 +2667,7 @@ index 104b059544d..edbc36fc526 100644
  /* ----------------------------------------------------------------
   *		ExecProcNode
   *
-@@ -314,6 +313,51 @@ ExecProcNode(PlanState *node)
+@@ -314,6 +313,48 @@ ExecProcNode(PlanState *node)
  }
  #endif
  
@@ -2687,11 +2693,8 @@ index 104b059544d..edbc36fc526 100644
 +	if (!instr)
 +		return result;
 +#endif
-+
-+	/*
-+	 * Assert(!instr->need_timer && !instro->need_bufusage &&
-+	 * !instr->need_walusage);
-+	 */
++	if (!instr->shortcut)
++		return result;
 +
 +	/* count the returned tuples */
 +	if (!TupIsNull(result))
@@ -2714,10 +2717,18 @@ index 104b059544d..edbc36fc526 100644
   * prototypes from functions in execExpr.c
   */
 diff --git a/src/include/executor/instrument.h b/src/include/executor/instrument.h
-index 03653ab6c6c..7585703ac61 100644
+index 03653ab6c6c..69916d31dc0 100644
 --- a/src/include/executor/instrument.h
 +++ b/src/include/executor/instrument.h
-@@ -78,15 +78,25 @@ typedef struct Instrumentation
+@@ -68,6 +68,7 @@ typedef enum InstrumentOption
+ 
+ typedef struct Instrumentation
+ {
++	bool		shortcut;		/* true if we can shortcut InstrStartNode and InstrStopNode */
+ 	/* Parameters set at node creation: */
+ 	bool		need_timer;		/* true if we need timer data */
+ 	bool		need_bufusage;	/* true if we need buffer usage data */
+@@ -78,15 +79,25 @@ typedef struct Instrumentation
  	instr_time	starttime;		/* start time of current iteration of node */
  	instr_time	counter;		/* accumulated runtime for this node */
  	double		firsttuple;		/* time for first tuple of this cycle */
@@ -2743,7 +2754,7 @@ index 03653ab6c6c..7585703ac61 100644
  	double		nfiltered1;		/* # of tuples removed by scanqual or joinqual */
  	double		nfiltered2;		/* # of tuples removed by "other" quals */
  	BufferUsage bufusage;		/* total buffer usage */
-@@ -105,10 +115,6 @@ extern PGDLLIMPORT WalUsage pgWalUsage;
+@@ -105,10 +116,6 @@ extern PGDLLIMPORT WalUsage pgWalUsage;
  extern Instrumentation *InstrAlloc(int n, int instrument_options,
  								   bool async_mode);
  extern void InstrInit(Instrumentation *instr, int instrument_options);
@@ -2754,7 +2765,7 @@ index 03653ab6c6c..7585703ac61 100644
  extern void InstrAggNode(Instrumentation *dst, Instrumentation *add);
  extern void InstrStartParallelQuery(void);
  extern void InstrEndParallelQuery(BufferUsage *bufusage, WalUsage *walusage);
-@@ -118,4 +124,135 @@ extern void BufferUsageAccumDiff(BufferUsage *dst,
+@@ -118,4 +125,135 @@ extern void BufferUsageAccumDiff(BufferUsage *dst,
  extern void WalUsageAccumDiff(WalUsage *dst, const WalUsage *add,
  							  const WalUsage *sub);
  

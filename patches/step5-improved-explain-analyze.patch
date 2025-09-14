@@ -571,7 +571,7 @@ index f098a5557cf..c7af573a646 100644
  
  	return planstate_tree_walker(planstate, ExecParallelReportInstrumentation,
 diff --git a/src/backend/executor/execProcnode.c b/src/backend/executor/execProcnode.c
-index f5f9cfbeead..de3367e03fa 100644
+index f5f9cfbeead..c2c5a473685 100644
 --- a/src/backend/executor/execProcnode.c
 +++ b/src/backend/executor/execProcnode.c
 @@ -121,6 +121,9 @@
@@ -584,9 +584,12 @@ index f5f9cfbeead..de3367e03fa 100644
  static bool ExecShutdownNode_walker(PlanState *node, void *context);
  
  
-@@ -462,7 +465,36 @@ ExecProcNodeFirst(PlanState *node)
+@@ -461,8 +464,44 @@ ExecProcNodeFirst(PlanState *node)
+ 	 * does instrumentation.  Otherwise we can dispense with all wrappers and
  	 * have ExecProcNode() directly call the relevant function from now on.
  	 */
++	set_shortcut_false(node);
++
  	if (node->instrument)
 -		node->ExecProcNode = ExecProcNodeInstr;
 +	{
@@ -601,9 +604,14 @@ index f5f9cfbeead..de3367e03fa 100644
 +		 */
 +		if (node->instrument->need_timer || node->instrument->need_bufusage
 +			|| node->instrument->need_walusage)
++		{
 +			node->ExecProcNode = ExecProcNodeInstr;
++		}
 +		else
++		{
++			set_shortcut_true(node);
 +			node->ExecProcNode = node->ExecProcNodeReal;
++		}
 +#else
 +		/*--
 +		 * Use ExecProcNodeInstrLite() to avoid calling InstrStartNode()
@@ -622,7 +630,7 @@ index f5f9cfbeead..de3367e03fa 100644
  	else
  		node->ExecProcNode = node->ExecProcNodeReal;
  
-@@ -484,10 +516,39 @@ ExecProcNodeInstr(PlanState *node)
+@@ -484,10 +523,39 @@ ExecProcNodeInstr(PlanState *node)
  
  	result = node->ExecProcNodeReal(node);
  
@@ -663,7 +671,7 @@ index f5f9cfbeead..de3367e03fa 100644
  
  
  /* ----------------------------------------------------------------
-@@ -792,7 +853,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
+@@ -792,7 +860,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
  	 * has never been executed, so as to avoid incorrectly making it appear
  	 * that it has.
  	 */
@@ -672,7 +680,7 @@ index f5f9cfbeead..de3367e03fa 100644
  		InstrStartNode(node->instrument);
  
  	planstate_tree_walker(node, ExecShutdownNode_walker, context);
-@@ -822,8 +883,8 @@ ExecShutdownNode_walker(PlanState *node, void *context)
+@@ -822,8 +890,8 @@ ExecShutdownNode_walker(PlanState *node, void *context)
  	}
  
  	/* Stop the node if we started it above, reporting 0 tuples. */
@@ -3063,7 +3071,7 @@ index 86db3dc8d0d..e1aac4c6d27 100644
  	struct Instrumentation *totaltime;	/* total time spent in ExecutorRun */
  } QueryDesc;
 diff --git a/src/include/executor/executor.h b/src/include/executor/executor.h
-index 104b059544d..47edf777b5b 100644
+index 104b059544d..8446b8c145d 100644
 --- a/src/include/executor/executor.h
 +++ b/src/include/executor/executor.h
 @@ -296,7 +296,6 @@ extern void ExecEndNode(PlanState *node);
@@ -3074,7 +3082,7 @@ index 104b059544d..47edf777b5b 100644
  /* ----------------------------------------------------------------
   *		ExecProcNode
   *
-@@ -314,6 +313,39 @@ ExecProcNode(PlanState *node)
+@@ -314,6 +313,43 @@ ExecProcNode(PlanState *node)
  }
  #endif
  
@@ -3095,12 +3103,16 @@ index 104b059544d..47edf777b5b 100644
 +{
 +	uint64_t current = node->hot_instr;
 +
++	if ((current & SHORTCUT_MASK) == 0) /* is_shortcut_false(node) */
++		return result;
++
 +	if (!TupIsNull(result))
++		/* TODO: Prevent overflow */
 +		/* Increment tuplecount  + running = true */
-+		current = ((current + 1) & TUPLECOUNT_MASK) | RUNNING_MASK;
-+	else
-+		/* running = true */
-+		current |= RUNNING_MASK;
++		current = ((current + 1) & TUPLECOUNT_MASK) | (current & (SHORTCUT_MASK | RUNNING_MASK));
++
++	/* running = true */
++	current |= RUNNING_MASK;
 +
 +	/* store current */
 +	node->hot_instr = current;
@@ -3259,14 +3271,14 @@ index 03653ab6c6c..d6e18401fc1 100644
 +
  #endif							/* INSTRUMENT_H */
 diff --git a/src/include/nodes/execnodes.h b/src/include/nodes/execnodes.h
-index e107d6e5f81..618843fb459 100644
+index e107d6e5f81..9f34d5fcea5 100644
 --- a/src/include/nodes/execnodes.h
 +++ b/src/include/nodes/execnodes.h
 @@ -522,6 +522,7 @@ typedef struct ResultRelInfo
  	/* array of trigger WHEN expr states */
  	ExprState **ri_TrigWhenExprs;
  
-+	uint64_t    hot_instr;		/* bit 0: running, bit 1-63: tuplecount */
++	uint64_t    hot_instr;		/* bit 63: shortcut: bit 62: running, bit 0-61: tuplecount */
  	/* optional runtime measurements for triggers */
  	Instrumentation *ri_TrigInstrument;
  
@@ -3274,13 +3286,13 @@ index e107d6e5f81..618843fb459 100644
  	ExecProcNodeMtd ExecProcNodeReal;	/* actual function, if above is a
  										 * wrapper */
  
-+	uint64_t    hot_instr;		/* bit 0: running, bit 1-63: tuplecount */
++	uint64_t    hot_instr;		/* bit 63: shortcut: bit 62: running, bit 0-61: tuplecount */
  	Instrumentation *instrument;	/* Optional runtime stats for this node */
 +	uint64_t    worker_hot_instr;
  	WorkerInstrumentation *worker_instrument;	/* per-worker instrumentation */
  
  	/* Per-worker JIT instrumentation */
-@@ -2930,4 +2933,218 @@ typedef struct LimitState
+@@ -2930,4 +2933,220 @@ typedef struct LimitState
  	TupleTableSlot *last_slot;	/* slot for evaluation of ties */
  } LimitState;
  
@@ -3293,27 +3305,33 @@ index e107d6e5f81..618843fb459 100644
 + * For hot_instr in Instrumentation
 + */
 +/* bit definition */
-+#define RUNNING_BIT         63
-+#define RUNNING_MASK        (1ULL << RUNNING_BIT)
-+#define TUPLECOUNT_MASK     (~RUNNING_MASK)
-+#define MAX_TUPLECOUNT      ((1ULL << 63) - 1)
++#define SHORTCUT_BIT   63
++#define RUNNING_BIT    62
 +
-+/* running flag operation */
-+#define is_running_true(node)      (((node)->hot_instr & RUNNING_MASK) != 0)
-+#define set_running_true(node)     ((node)->hot_instr |= RUNNING_MASK)
-+#define set_running_false(node)    ((node)->hot_instr &= TUPLECOUNT_MASK)
++#define SHORTCUT_MASK  (1ULL << SHORTCUT_BIT)
++#define RUNNING_MASK   (1ULL << RUNNING_BIT)
++#define TUPLECOUNT_MASK ((1ULL << RUNNING_BIT) - 1)  //(0..61)
 +
-+/* tuplecount operation */
-+#define get_tuplecount(node)       ((node)->hot_instr & TUPLECOUNT_MASK)
-+#define set_tuplecount(node, n)    do { \
-+		(node)->hot_instr = ((node)->hot_instr & RUNNING_MASK) | ((n) & TUPLECOUNT_MASK); \
-+} while(0)
++// shortcut
++#define is_shortcut_true(node)    (((node)->hot_instr & SHORTCUT_MASK) != 0)
++#define is_shortcut_false(node)   (((node)->hot_instr & SHORTCUT_MASK) == 0)
++#define set_shortcut_true(node)   ((node)->hot_instr |= SHORTCUT_MASK)
++#define set_shortcut_false(node)  ((node)->hot_instr &= ~SHORTCUT_MASK)
 +
-+#define add_tuplecount(node, n)    do { \
-+		uint64_t current = get_tuplecount(node);						\
-+	uint64_t new_count = (current + (n)) & TUPLECOUNT_MASK;				\
-+	(node)->hot_instr = ((node)->hot_instr & RUNNING_MASK) | new_count; \
-+} while(0)
++// running
++#define is_running_true(node)    (((node)->hot_instr & RUNNING_MASK) != 0)
++#define is_running_false(node)   (((node)->hot_instr & RUNNING_MASK) == 0)
++#define set_running_true(node)   ((node)->hot_instr |= RUNNING_MASK)
++#define set_running_false(node)  ((node)->hot_instr &= ~RUNNING_MASK)
++
++// tuplecount
++#define get_tuplecount(node)     ((node)->hot_instr & TUPLECOUNT_MASK)
++#define set_tuplecount(node, n)  \
++	((node)->hot_instr = ((node)->hot_instr & ~TUPLECOUNT_MASK) | ((n) & TUPLECOUNT_MASK))
++#define add_tuplecount(node, n)  \
++	((node)->hot_instr = ((node)->hot_instr & ~TUPLECOUNT_MASK) |		\
++	 (((node)->hot_instr + (n)) & TUPLECOUNT_MASK))
++
 +
 +/* Exit from a plan node */
 +static pg_attribute_always_inline void
@@ -3323,11 +3341,7 @@ index e107d6e5f81..618843fb459 100644
 +	uint64_t 	save_tuplecount = get_tuplecount(node);
 +	instr_time	endtime;
 +
-+	/*
-+	 * We omit adding nTuples, as the ExecXX function family already
-+	 * increments nTuples.
-+	 * 	add_tuplecount(node, nTuples);
-+	 */
++	add_tuplecount(node, nTuples);
 +
 +	/* let's update the time only if the timer was requested */
 +	if (instr->need_timer)
@@ -3351,7 +3365,7 @@ index e107d6e5f81..618843fb459 100644
 +						  &pgWalUsage, &instr->walusage_start);
 +
 +	/* Is this the first tuple of this cycle? */
-+	if (!is_running_true(node))
++	if (is_running_false(node))
 +	{
 +		set_running_true(node);
 +		if (instr->need_timer)
