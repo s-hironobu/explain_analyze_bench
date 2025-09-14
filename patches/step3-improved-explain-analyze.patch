@@ -315,12 +315,12 @@ index f5f9cfbeead..387dd19fdc8 100644
 +		if (node->instrument->need_timer || node->instrument->need_bufusage
 +			|| node->instrument->need_walusage)
 +		{
-+			node->instrument->shortcut = false;
++			node->instrument->fast_path_instr = false;
 +			node->ExecProcNode = ExecProcNodeInstr;
 +		}
 +		else
 +		{
-+			node->instrument->shortcut = true;
++			node->instrument->fast_path_instr = true;
 +			node->ExecProcNode = node->ExecProcNodeReal;
 +		}
 +#else
@@ -2693,7 +2693,7 @@ index 104b059544d..41481bd08bd 100644
 +	if (!instr)
 +		return result;
 +#endif
-+	if (!instr->shortcut)
++	if (!instr->fast_path_instr)
 +		return result;
 +
 +	/* count the returned tuples */
@@ -2724,7 +2724,7 @@ index 03653ab6c6c..69916d31dc0 100644
  
  typedef struct Instrumentation
  {
-+	bool		shortcut;		/* true if we can shortcut InstrStartNode and InstrStopNode */
++	bool		fast_path_instr;		/* true if we can bypass InstrStartNode and InstrStopNode */
  	/* Parameters set at node creation: */
  	bool		need_timer;		/* true if we need timer data */
  	bool		need_bufusage;	/* true if we need buffer usage data */
