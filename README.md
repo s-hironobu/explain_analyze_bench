@@ -2,8 +2,7 @@
 
 This repository stores the tools and results for benchmarking Faster EXPLAIN ANALYZE, as described in my blog posts:
 + [The 3 Steps to a Faster EXPLAIN ANALYZE](http://www.interdb.jp/blog/post/pgsql/explain_analyze_01/)
-+ [A Deep Dive into The Faster EXPLAIN ANALYZE](http://www.interdb.jp/blog/post/pgsql/explain_analyze_02/)
-+ [Two More Steps to a Faster EXPLAIN ANALYZE](http://www.interdb.jp/blog/post/pgsql/explain_analyze_03/)
++ [Two More Steps to a Faster EXPLAIN ANALYZE](http://www.interdb.jp/blog/post/pgsql/explain_analyze_02/)
 
 ## Requirements
 
