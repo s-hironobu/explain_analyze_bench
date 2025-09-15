@@ -1,290 +1,5 @@
-diff --git a/src/backend/commands/explain.c b/src/backend/commands/explain.c
-index 8345bc0264b..b7dd299497a 100644
---- a/src/backend/commands/explain.c
-+++ b/src/backend/commands/explain.c
-@@ -1133,11 +1133,19 @@ report_triggers(ResultRelInfo *rInfo, bool show_relname, ExplainState *es)
- 				appendStringInfo(es->str, " for constraint %s", conname);
- 			if (show_relname)
- 				appendStringInfo(es->str, " on %s", relname);
-+#ifdef UINT64
-+			if (es->timing)
-+				appendStringInfo(es->str, ": time=%.3f calls=%llu\n",
-+								 1000.0 * instr->total, instr->ntuples);
-+			else
-+				appendStringInfo(es->str, ": calls=%lld\n", instr->ntuples);
-+#else
- 			if (es->timing)
- 				appendStringInfo(es->str, ": time=%.3f calls=%.0f\n",
- 								 1000.0 * instr->total, instr->ntuples);
- 			else
- 				appendStringInfo(es->str, ": calls=%.0f\n", instr->ntuples);
-+#endif
- 		}
- 		else
- 		{
-@@ -1148,7 +1156,11 @@ report_triggers(ResultRelInfo *rInfo, bool show_relname, ExplainState *es)
- 			if (es->timing)
- 				ExplainPropertyFloat("Time", "ms", 1000.0 * instr->total, 3,
- 									 es);
-+#ifdef UINT64
-+			ExplainPropertyInteger("Calls", NULL, instr->ntuples, es);
-+#else
- 			ExplainPropertyFloat("Calls", NULL, instr->ntuples, 0, es);
-+#endif
- 		}
- 
- 		if (conname)
-@@ -1829,10 +1841,17 @@ ExplainNode(PlanState *planstate, List *ancestors,
- 	if (es->analyze &&
- 		planstate->instrument && planstate->instrument->nloops > 0)
- 	{
-+#ifdef UINT64
-+		uint64_t 	nloops = planstate->instrument->nloops;
-+		double		startup_ms = 1000.0 * planstate->instrument->startup / (double) nloops;
-+		double		total_ms = 1000.0 * planstate->instrument->total / (double) nloops;
-+		double		rows = planstate->instrument->ntuples / (double) nloops;
-+#else
- 		double		nloops = planstate->instrument->nloops;
- 		double		startup_ms = 1000.0 * planstate->instrument->startup / nloops;
- 		double		total_ms = 1000.0 * planstate->instrument->total / nloops;
- 		double		rows = planstate->instrument->ntuples / nloops;
-+#endif
- 
- 		if (es->format == EXPLAIN_FORMAT_TEXT)
- 		{
-@@ -1841,7 +1860,11 @@ ExplainNode(PlanState *planstate, List *ancestors,
- 			if (es->timing)
- 				appendStringInfo(es->str, "time=%.3f..%.3f ", startup_ms, total_ms);
- 
-+#ifdef UINT64
-+			appendStringInfo(es->str, "rows=%.2f loops=%llu)", rows, nloops);
-+#else
- 			appendStringInfo(es->str, "rows=%.2f loops=%.0f)", rows, nloops);
-+#endif
- 		}
- 		else
- 		{
-@@ -1853,7 +1876,11 @@ ExplainNode(PlanState *planstate, List *ancestors,
- 									 3, es);
- 			}
- 			ExplainPropertyFloat("Actual Rows", NULL, rows, 2, es);
-+#ifdef UINT64
-+			ExplainPropertyInteger("Actual Loops", NULL, nloops, es);
-+#else
- 			ExplainPropertyFloat("Actual Loops", NULL, nloops, 0, es);
-+#endif
- 		}
- 	}
- 	else if (es->analyze)
-@@ -1868,7 +1895,11 @@ ExplainNode(PlanState *planstate, List *ancestors,
- 				ExplainPropertyFloat("Actual Total Time", "ms", 0.0, 3, es);
- 			}
- 			ExplainPropertyFloat("Actual Rows", NULL, 0.0, 0, es);
-+#ifdef UINT64
-+			ExplainPropertyInteger("Actual Loops", NULL, 0, es);
-+#else
- 			ExplainPropertyFloat("Actual Loops", NULL, 0.0, 0, es);
-+#endif
- 		}
- 	}
- 
-@@ -1889,16 +1920,26 @@ ExplainNode(PlanState *planstate, List *ancestors,
- 		for (int n = 0; n < w->num_workers; n++)
- 		{
- 			Instrumentation *instrument = &w->instrument[n];
-+#ifdef UINT64
-+			uint64_t 	nloops = instrument->nloops;
-+#else
- 			double		nloops = instrument->nloops;
-+#endif
- 			double		startup_ms;
- 			double		total_ms;
- 			double		rows;
- 
- 			if (nloops <= 0)
- 				continue;
-+#ifdef UINT64
-+			startup_ms = 1000.0 * instrument->startup / (double) nloops;
-+			total_ms = 1000.0 * instrument->total / (double) nloops;
-+			rows = instrument->ntuples / (double) nloops;
-+#else
- 			startup_ms = 1000.0 * instrument->startup / nloops;
- 			total_ms = 1000.0 * instrument->total / nloops;
- 			rows = instrument->ntuples / nloops;
-+#endif
- 
- 			ExplainOpenWorker(n, es);
- 
-@@ -1909,7 +1950,11 @@ ExplainNode(PlanState *planstate, List *ancestors,
- 				if (es->timing)
- 					appendStringInfo(es->str, "time=%.3f..%.3f ", startup_ms, total_ms);
- 
-+#ifdef UINT64
-+				appendStringInfo(es->str, "rows=%.2f loops=%lld\n", rows, nloops);
-+#else
- 				appendStringInfo(es->str, "rows=%.2f loops=%.0f\n", rows, nloops);
-+#endif
- 			}
- 			else
- 			{
-@@ -1922,7 +1967,11 @@ ExplainNode(PlanState *planstate, List *ancestors,
- 				}
- 
- 				ExplainPropertyFloat("Actual Rows", NULL, rows, 2, es);
-+#ifdef UINT64
-+				ExplainPropertyInteger("Actual Loops", NULL, nloops, es);
-+#else
- 				ExplainPropertyFloat("Actual Loops", NULL, nloops, 0, es);
-+#endif
- 			}
- 
- 			ExplainCloseWorker(n, es);
-@@ -1980,8 +2029,13 @@ ExplainNode(PlanState *planstate, List *ancestors,
- 				show_instrumentation_count("Rows Removed by Filter", 1,
- 										   planstate, es);
- 			if (es->analyze)
-+#ifdef UINT64
-+				ExplainPropertyInteger("Heap Fetches", NULL,
-+									   planstate->instrument->ntuples2, es);
-+#else
- 				ExplainPropertyFloat("Heap Fetches", NULL,
- 									 planstate->instrument->ntuples2, 0, es);
-+#endif
- 			show_indexsearches_info(planstate, es);
- 			break;
- 		case T_BitmapIndexScan:
-@@ -2295,7 +2349,11 @@ ExplainNode(PlanState *planstate, List *ancestors,
- 		for (int n = 0; n < w->num_workers; n++)
- 		{
- 			Instrumentation *instrument = &w->instrument[n];
-+#ifdef UINT64
-+			uint64_t 	nloops = instrument->nloops;
-+#else
- 			double		nloops = instrument->nloops;
-+#endif
- 
- 			if (nloops <= 0)
- 				continue;
-@@ -3985,7 +4043,11 @@ show_instrumentation_count(const char *qlabel, int which,
- 						   PlanState *planstate, ExplainState *es)
- {
- 	double		nfiltered;
-+#ifdef UINT64
-+	uint64_t 	nloops;
-+#else
- 	double		nloops;
-+#endif
- 
- 	if (!es->analyze || !planstate->instrument)
- 		return;
-@@ -4000,7 +4062,11 @@ show_instrumentation_count(const char *qlabel, int which,
- 	if (nfiltered > 0 || es->format != EXPLAIN_FORMAT_TEXT)
- 	{
- 		if (nloops > 0)
-+#ifdef UINT64
-+			ExplainPropertyFloat(qlabel, NULL, nfiltered / (double) nloops, 0, es);
-+#else
- 			ExplainPropertyFloat(qlabel, NULL, nfiltered / nloops, 0, es);
-+#endif
- 		else
- 			ExplainPropertyFloat(qlabel, NULL, 0.0, 0, es);
- 	}
-@@ -4681,9 +4747,15 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
- 		/* EXPLAIN ANALYZE display of actual outcome for each tuple proposed */
- 		if (es->analyze && mtstate->ps.instrument)
- 		{
-+#ifdef UINT64
-+			uint64_t 	total;
-+			uint64_t 	 insert_path;
-+			uint64_t 	 other_path;
-+#else
- 			double		total;
- 			double		insert_path;
- 			double		other_path;
-+#endif
- 
- 			InstrEndLoop(outerPlanState(mtstate)->instrument);
- 
-@@ -4692,10 +4764,17 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
- 			other_path = mtstate->ps.instrument->ntuples2;
- 			insert_path = total - other_path;
- 
-+#ifdef UINT64
-+			ExplainPropertyInteger("Tuples Inserted", NULL,
-+								   insert_path, es);
-+			ExplainPropertyInteger("Conflicting Tuples", NULL,
-+								   other_path, es);
-+#else
- 			ExplainPropertyFloat("Tuples Inserted", NULL,
- 								 insert_path, 0, es);
- 			ExplainPropertyFloat("Conflicting Tuples", NULL,
- 								 other_path, 0, es);
-+#endif
- 		}
- 	}
- 	else if (node->operation == CMD_MERGE)
-diff --git a/src/backend/executor/execAsync.c b/src/backend/executor/execAsync.c
-index 5d3cabe73e3..753fbb794e5 100644
---- a/src/backend/executor/execAsync.c
-+++ b/src/backend/executor/execAsync.c
-@@ -47,8 +47,13 @@ ExecAsyncRequest(AsyncRequest *areq)
- 
- 	/* must provide our own instrumentation support */
- 	if (areq->requestee->instrument)
-+#ifdef UINT64
-+		InstrStopNode(areq->requestee->instrument,
-+					  TupIsNull(areq->result) ? 0 : 1);
-+#else
- 		InstrStopNode(areq->requestee->instrument,
- 					  TupIsNull(areq->result) ? 0.0 : 1.0);
-+#endif
- }
- 
- /*
-@@ -78,7 +83,11 @@ ExecAsyncConfigureWait(AsyncRequest *areq)
- 
- 	/* must provide our own instrumentation support */
- 	if (areq->requestee->instrument)
-+#ifdef UINT64
-+		InstrStopNode(areq->requestee->instrument, 0);
-+#else
- 		InstrStopNode(areq->requestee->instrument, 0.0);
-+#endif
- }
- 
- /*
-@@ -106,8 +115,13 @@ ExecAsyncNotify(AsyncRequest *areq)
- 
- 	/* must provide our own instrumentation support */
- 	if (areq->requestee->instrument)
-+#ifdef UINT64
-+		InstrStopNode(areq->requestee->instrument,
-+					  TupIsNull(areq->result) ? 0 : 1);
-+#else
- 		InstrStopNode(areq->requestee->instrument,
- 					  TupIsNull(areq->result) ? 0.0 : 1.0);
-+#endif
- }
- 
- /*
-diff --git a/src/backend/executor/execMain.c b/src/backend/executor/execMain.c
-index 0391798dd2c..740a0b64758 100644
---- a/src/backend/executor/execMain.c
-+++ b/src/backend/executor/execMain.c
-@@ -246,7 +246,11 @@ standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
- 	estate->es_snapshot = RegisterSnapshot(queryDesc->snapshot);
- 	estate->es_crosscheck_snapshot = RegisterSnapshot(queryDesc->crosscheck_snapshot);
- 	estate->es_top_eflags = eflags;
-+#ifdef ALWAYS_INSTR
-+	estate->es_instrument = true;
-+#else
- 	estate->es_instrument = queryDesc->instrument_options;
-+#endif
- 	estate->es_jit_flags = queryDesc->plannedstmt->jitFlags;
- 
- 	/*
 diff --git a/src/backend/executor/execProcnode.c b/src/backend/executor/execProcnode.c
-index f5f9cfbeead..387dd19fdc8 100644
+index f5f9cfbeead..2e4176e38b8 100644
 --- a/src/backend/executor/execProcnode.c
 +++ b/src/backend/executor/execProcnode.c
 @@ -121,6 +121,9 @@
@@ -341,20 +56,10 @@ index f5f9cfbeead..387dd19fdc8 100644
  	else
  		node->ExecProcNode = node->ExecProcNodeReal;
  
-@@ -484,10 +522,43 @@ ExecProcNodeInstr(PlanState *node)
+@@ -490,6 +528,35 @@ ExecProcNodeInstr(PlanState *node)
+ }
  
- 	result = node->ExecProcNodeReal(node);
  
-+#ifdef UINT64
-+	InstrStopNode(node->instrument, TupIsNull(result) ? 0 : 1);
-+#else
- 	InstrStopNode(node->instrument, TupIsNull(result) ? 0.0 : 1.0);
-+#endif
-+
-+	return result;
-+}
-+
-+
 +#ifndef DEV3
 +/*
 + * A simplified version of ExecProcNodeInstr. When the following conditions
@@ -378,47 +83,23 @@ index f5f9cfbeead..387dd19fdc8 100644
 +	/* Is this the first tuple of this cycle? */
 +	if (!node->instrument->running)
 +		node->instrument->running = true;
- 
- 	return result;
- }
++
++	return result;
++}
 +#endif
- 
- 
++
++
  /* ----------------------------------------------------------------
+  *		MultiExecProcNode
+  *
 diff --git a/src/backend/executor/instrument.c b/src/backend/executor/instrument.c
-index 56e635f4700..51c9cbe8dc0 100644
+index 56e635f4700..0896b890bc3 100644
 --- a/src/backend/executor/instrument.c
 +++ b/src/backend/executor/instrument.c
-@@ -36,9 +36,15 @@ InstrAlloc(int n, int instrument_options, bool async_mode)
- 	instr = palloc0(n * sizeof(Instrumentation));
- 	if (instrument_options & (INSTRUMENT_BUFFERS | INSTRUMENT_TIMER | INSTRUMENT_WAL))
- 	{
-+#ifdef ALWAYS_INSTR
-+		bool		need_buffers = false;
-+		bool		need_wal = false;
-+		bool		need_timer = false;
-+#else
- 		bool		need_buffers = (instrument_options & INSTRUMENT_BUFFERS) != 0;
- 		bool		need_wal = (instrument_options & INSTRUMENT_WAL) != 0;
- 		bool		need_timer = (instrument_options & INSTRUMENT_TIMER) != 0;
-+#endif
- 		int			i;
- 
- 		for (i = 0; i < n; i++)
-@@ -58,110 +64,15 @@ void
- InstrInit(Instrumentation *instr, int instrument_options)
- {
- 	memset(instr, 0, sizeof(Instrumentation));
-+#ifdef ALWAYS_INSTR
-+	instr->need_bufusage = false;
-+	instr->need_walusage = false;
-+	instr->need_timer = false;
-+#else
- 	instr->need_bufusage = (instrument_options & INSTRUMENT_BUFFERS) != 0;
- 	instr->need_walusage = (instrument_options & INSTRUMENT_WAL) != 0;
+@@ -63,107 +63,6 @@ InstrInit(Instrumentation *instr, int instrument_options)
  	instr->need_timer = (instrument_options & INSTRUMENT_TIMER) != 0;
--}
--
+ }
+ 
 -/* Entry to a plan node */
 -void
 -InstrStartNode(Instrumentation *instr)
@@ -518,10 +199,11 @@ index 56e635f4700..51c9cbe8dc0 100644
 -	INSTR_TIME_SET_ZERO(instr->counter);
 -	instr->firsttuple = 0;
 -	instr->tuplecount = 0;
-+#endif
- }
- 
+-}
+-
  /* aggregate instrumentation information */
+ void
+ InstrAggNode(Instrumentation *dst, Instrumentation *add)
 diff --git a/src/backend/executor/nodeAgg.c b/src/backend/executor/nodeAgg.c
 index 377e016d732..4bd3e20a5e6 100644
 --- a/src/backend/executor/nodeAgg.c
@@ -2656,7 +2338,7 @@ index f6379c35d2f..c01016af726 100644
  
  
 diff --git a/src/include/executor/executor.h b/src/include/executor/executor.h
-index 104b059544d..41481bd08bd 100644
+index 104b059544d..e1a6fa88e86 100644
 --- a/src/include/executor/executor.h
 +++ b/src/include/executor/executor.h
 @@ -296,7 +296,6 @@ extern void ExecEndNode(PlanState *node);
@@ -2667,7 +2349,7 @@ index 104b059544d..41481bd08bd 100644
  /* ----------------------------------------------------------------
   *		ExecProcNode
   *
-@@ -314,6 +313,48 @@ ExecProcNode(PlanState *node)
+@@ -314,6 +313,47 @@ ExecProcNode(PlanState *node)
  }
  #endif
  
@@ -2688,11 +2370,10 @@ index 104b059544d..41481bd08bd 100644
 +{
 +	Instrumentation *const instr = node->instrument;
 +
-+#ifndef ALWAYS_INSTR
 +	/* Most common case: no instrumentation */
 +	if (!instr)
 +		return result;
-+#endif
++
 +	if (!instr->fast_path_instr)
 +		return result;
 +
@@ -2717,7 +2398,7 @@ index 104b059544d..41481bd08bd 100644
   * prototypes from functions in execExpr.c
   */
 diff --git a/src/include/executor/instrument.h b/src/include/executor/instrument.h
-index 03653ab6c6c..69916d31dc0 100644
+index 03653ab6c6c..443da37cbc1 100644
 --- a/src/include/executor/instrument.h
 +++ b/src/include/executor/instrument.h
 @@ -68,6 +68,7 @@ typedef enum InstrumentOption
@@ -2728,33 +2409,7 @@ index 03653ab6c6c..69916d31dc0 100644
  	/* Parameters set at node creation: */
  	bool		need_timer;		/* true if we need timer data */
  	bool		need_bufusage;	/* true if we need buffer usage data */
-@@ -78,15 +79,25 @@ typedef struct Instrumentation
- 	instr_time	starttime;		/* start time of current iteration of node */
- 	instr_time	counter;		/* accumulated runtime for this node */
- 	double		firsttuple;		/* time for first tuple of this cycle */
-+#ifdef UINT64
-+	uint64_t 	tuplecount;		/* # of tuples emitted so far this cycle */
-+#else
- 	double		tuplecount;		/* # of tuples emitted so far this cycle */
-+#endif
- 	BufferUsage bufusage_start; /* buffer usage at start */
- 	WalUsage	walusage_start; /* WAL usage at start */
- 	/* Accumulated statistics across all completed cycles: */
- 	double		startup;		/* total startup time (in seconds) */
- 	double		total;			/* total time (in seconds) */
-+#ifdef UINT64
-+	uint64_t 	ntuples;		/* total tuples produced */
-+	uint64_t 	ntuples2;		/* secondary node-specific tuple counter */
-+	uint64_t 	nloops;			/* # of run cycles for this node */
-+#else
- 	double		ntuples;		/* total tuples produced */
- 	double		ntuples2;		/* secondary node-specific tuple counter */
- 	double		nloops;			/* # of run cycles for this node */
-+#endif
- 	double		nfiltered1;		/* # of tuples removed by scanqual or joinqual */
- 	double		nfiltered2;		/* # of tuples removed by "other" quals */
- 	BufferUsage bufusage;		/* total buffer usage */
-@@ -105,10 +116,6 @@ extern PGDLLIMPORT WalUsage pgWalUsage;
+@@ -105,10 +106,6 @@ extern PGDLLIMPORT WalUsage pgWalUsage;
  extern Instrumentation *InstrAlloc(int n, int instrument_options,
  								   bool async_mode);
  extern void InstrInit(Instrumentation *instr, int instrument_options);
@@ -2765,7 +2420,7 @@ index 03653ab6c6c..69916d31dc0 100644
  extern void InstrAggNode(Instrumentation *dst, Instrumentation *add);
  extern void InstrStartParallelQuery(void);
  extern void InstrEndParallelQuery(BufferUsage *bufusage, WalUsage *walusage);
-@@ -118,4 +125,135 @@ extern void BufferUsageAccumDiff(BufferUsage *dst,
+@@ -118,4 +115,116 @@ extern void BufferUsageAccumDiff(BufferUsage *dst,
  extern void WalUsageAccumDiff(WalUsage *dst, const WalUsage *add,
  							  const WalUsage *sub);
  
@@ -2786,19 +2441,10 @@ index 03653ab6c6c..69916d31dc0 100644
 +}
 +
 +/* Exit from a plan node */
-+#ifdef UINT64
-+static pg_attribute_always_inline void
-+InstrStopNode(Instrumentation *instr, uint64_t nTuples)
-+#else
 +static pg_attribute_always_inline void
 +InstrStopNode(Instrumentation *instr, double nTuples)
-+#endif
 +{
-+#ifdef UINT64
-+	uint64_t 	save_tuplecount = instr->tuplecount;
-+#else
 +	double		save_tuplecount = instr->tuplecount;
-+#endif
 +	instr_time	endtime;
 +
 +	/*
@@ -2841,24 +2487,14 @@ index 03653ab6c6c..69916d31dc0 100644
 +		 * In async mode, if the plan node hadn't emitted any tuples before,
 +		 * this might be the first tuple
 +		 */
-+#ifdef UINT64
-+		if (instr->need_timer && instr->async_mode && save_tuplecount < 1)
-+			instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
-+#else
 +		if (instr->need_timer && instr->async_mode && save_tuplecount < 1.0)
 +			instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
-+#endif
 +	}
 +}
 +
 +/* Update tuple count */
-+#ifdef UINT64
-+static pg_attribute_always_inline void
-+InstrUpdateTupleCount(Instrumentation *instr, uint64_t nTuples)
-+#else
 +static pg_attribute_always_inline void
 +InstrUpdateTupleCount(Instrumentation *instr, double nTuples)
-+#endif
 +{
 +	/* count the returned tuples */
 +	instr->tuplecount += nTuples;
