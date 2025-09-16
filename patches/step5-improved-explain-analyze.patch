@@ -3108,7 +3108,7 @@ index 104b059544d..8446b8c145d 100644
 +
 +	if (!TupIsNull(result))
 +		/* TODO: Prevent overflow */
-+		/* Increment tuplecount  + running = true */
++		/* tuplecount++ */
 +		current = ((current + 1) & TUPLECOUNT_MASK) | (current & (FAST_PATH_INSTR_MASK | RUNNING_MASK));
 +
 +	/* running = true */
