@@ -571,20 +571,10 @@ index f098a5557cf..c7af573a646 100644
  
  	return planstate_tree_walker(planstate, ExecParallelReportInstrumentation,
 diff --git a/src/backend/executor/execProcnode.c b/src/backend/executor/execProcnode.c
-index f5f9cfbeead..c2c5a473685 100644
+index f5f9cfbeead..bdb43e7919a 100644
 --- a/src/backend/executor/execProcnode.c
 +++ b/src/backend/executor/execProcnode.c
-@@ -121,6 +121,9 @@
- 
- static TupleTableSlot *ExecProcNodeFirst(PlanState *node);
- static TupleTableSlot *ExecProcNodeInstr(PlanState *node);
-+#ifndef DEV3
-+static TupleTableSlot *ExecProcNodeInstrLite(PlanState *node);
-+#endif
- static bool ExecShutdownNode_walker(PlanState *node, void *context);
- 
- 
-@@ -461,8 +464,44 @@ ExecProcNodeFirst(PlanState *node)
+@@ -461,8 +461,29 @@ ExecProcNodeFirst(PlanState *node)
  	 * does instrumentation.  Otherwise we can dispense with all wrappers and
  	 * have ExecProcNode() directly call the relevant function from now on.
  	 */
@@ -593,7 +583,6 @@ index f5f9cfbeead..c2c5a473685 100644
  	if (node->instrument)
 -		node->ExecProcNode = ExecProcNodeInstr;
 +	{
-+#ifdef DEV3
 +		/*--
 +		 * Use node->ExecProcNodeReal, which is modified to call PostExecProcNodeInstr
 +		 * before returning the result, to avoid calling InstrStartNode() and
@@ -612,66 +601,20 @@ index f5f9cfbeead..c2c5a473685 100644
 +			set_fast_path_instr_true(node);
 +			node->ExecProcNode = node->ExecProcNodeReal;
 +		}
-+#else
-+		/*--
-+		 * Use ExecProcNodeInstrLite() to avoid calling InstrStartNode()
-+		 * and InstrStopNode() when the following conditions are not required:
-+		 * - need_timer
-+		 * - need_bufusage
-+		 * - need_walusage
-+		 */
-+		if (node->instrument->need_timer || node->instrument->need_bufusage
-+			|| node->instrument->need_walusage)
-+			node->ExecProcNode = ExecProcNodeInstr;
-+		else
-+			node->ExecProcNode = ExecProcNodeInstrLite;
-+#endif
 +	}
  	else
  		node->ExecProcNode = node->ExecProcNodeReal;
  
-@@ -484,10 +523,39 @@ ExecProcNodeInstr(PlanState *node)
+@@ -484,7 +505,7 @@ ExecProcNodeInstr(PlanState *node)
  
  	result = node->ExecProcNodeReal(node);
  
 -	InstrStopNode(node->instrument, TupIsNull(result) ? 0.0 : 1.0);
 +	InstrStopNode(node, TupIsNull(result) ? 0 : 1);
-+
-+	return result;
-+}
-+
-+
-+#ifndef DEV3
-+/*
-+ * A simplified version of ExecProcNodeInstr. When the following conditions
-+ * are not required, this function avoids calling InstrStartNode and InstrStopNode.
-+ * Instead, it performs only two minimal checks:
-+ * - need_timer
-+ * - need_bufusage
-+ * - need_walusage
-+ */
-+static TupleTableSlot *
-+ExecProcNodeInstrLite(PlanState *node)
-+{
-+	TupleTableSlot *result;
-+
-+	result = node->ExecProcNodeReal(node);
-+
-+	/* count the returned tuples */
-+	if (!TupIsNull(result))
-+		node->instrument->tuplecount += 1.0;
-+
-+	/* Is this the first tuple of this cycle? */
-+	if (!node->instrument->hot.running)
-+		node->instrument->hot.running = true;
  
  	return result;
  }
-+#endif
- 
- 
- /* ----------------------------------------------------------------
-@@ -792,7 +860,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
+@@ -792,7 +813,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
  	 * has never been executed, so as to avoid incorrectly making it appear
  	 * that it has.
  	 */
@@ -680,7 +623,7 @@ index f5f9cfbeead..c2c5a473685 100644
  		InstrStartNode(node->instrument);
  
  	planstate_tree_walker(node, ExecShutdownNode_walker, context);
-@@ -822,8 +890,8 @@ ExecShutdownNode_walker(PlanState *node, void *context)
+@@ -822,8 +843,8 @@ ExecShutdownNode_walker(PlanState *node, void *context)
  	}
  
  	/* Stop the node if we started it above, reporting 0 tuples. */
@@ -890,118 +833,95 @@ index 56e635f4700..52a13111747 100644
  {
  	dst->wal_bytes += add->wal_bytes;
 diff --git a/src/backend/executor/nodeAgg.c b/src/backend/executor/nodeAgg.c
-index 377e016d732..4bd3e20a5e6 100644
+index 377e016d732..d824d506c10 100644
 --- a/src/backend/executor/nodeAgg.c
 +++ b/src/backend/executor/nodeAgg.c
-@@ -2267,10 +2267,18 @@ ExecAgg(PlanState *pstate)
+@@ -2267,10 +2267,10 @@ ExecAgg(PlanState *pstate)
  		}
  
  		if (!TupIsNull(result))
-+#ifdef DEV3
+-			return result;
 +			return PostExecProcNodeInstr(pstate, result);
-+#else
- 			return result;
-+#endif
  	}
  
-+#ifdef DEV3
+-	return NULL;
 +	return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 	return NULL;
-+#endif
  }
  
  /*
 diff --git a/src/backend/executor/nodeAppend.c b/src/backend/executor/nodeAppend.c
-index a11b36c7176..ec78532b76c 100644
+index a11b36c7176..680980e8016 100644
 --- a/src/backend/executor/nodeAppend.c
 +++ b/src/backend/executor/nodeAppend.c
-@@ -316,7 +316,14 @@ ExecAppend(PlanState *pstate)
+@@ -316,7 +316,10 @@ ExecAppend(PlanState *pstate)
  
  		/* Nothing to do if there are no subplans */
  		if (node->as_nplans == 0)
+-			return ExecClearTuple(node->ps.ps_ResultTupleSlot);
 +		{
-+#ifdef DEV3
 +			result = ExecClearTuple(node->ps.ps_ResultTupleSlot);
 +			return PostExecProcNodeInstr(pstate, result);
-+#else
- 			return ExecClearTuple(node->ps.ps_ResultTupleSlot);
-+#endif
 +		}
  
  		/* If there are any async subplans, begin executing them. */
  		if (node->as_nasyncplans > 0)
-@@ -327,7 +334,14 @@ ExecAppend(PlanState *pstate)
+@@ -327,7 +330,10 @@ ExecAppend(PlanState *pstate)
  		 * proceeding.
  		 */
  		if (!node->choose_next_subplan(node) && node->as_nasyncremain == 0)
+-			return ExecClearTuple(node->ps.ps_ResultTupleSlot);
 +		{
-+#ifdef DEV3
 +			result = ExecClearTuple(node->ps.ps_ResultTupleSlot);
 +			return PostExecProcNodeInstr(pstate, result);
-+#else
- 			return ExecClearTuple(node->ps.ps_ResultTupleSlot);
-+#endif
 +		}
  
  		Assert(node->as_syncdone ||
  			   (node->as_whichplan >= 0 &&
-@@ -349,7 +363,11 @@ ExecAppend(PlanState *pstate)
+@@ -349,7 +355,8 @@ ExecAppend(PlanState *pstate)
  		if (node->as_syncdone || !bms_is_empty(node->as_needrequest))
  		{
  			if (ExecAppendAsyncGetNext(node, &result))
-+#ifdef DEV3
+-				return result;
 +				return PostExecProcNodeInstr(pstate, result);
-+#else
- 				return result;
-+#endif
++
  			Assert(!node->as_syncdone);
  			Assert(bms_is_empty(node->as_needrequest));
  		}
-@@ -372,7 +390,11 @@ ExecAppend(PlanState *pstate)
+@@ -372,7 +379,7 @@ ExecAppend(PlanState *pstate)
  			 * NOT make use of the result slot that was set up in
  			 * ExecInitAppend; there's no need for it.
  			 */
-+#ifdef DEV3
+-			return result;
 +			return PostExecProcNodeInstr(pstate, result);
-+#else
- 			return result;
-+#endif
  		}
  
  		/*
-@@ -385,7 +407,14 @@ ExecAppend(PlanState *pstate)
+@@ -385,7 +392,10 @@ ExecAppend(PlanState *pstate)
  
  		/* choose new sync subplan; if no sync/async subplans, we're done */
  		if (!node->choose_next_subplan(node) && node->as_nasyncremain == 0)
+-			return ExecClearTuple(node->ps.ps_ResultTupleSlot);
 +		{
-+#ifdef DEV3
 +			result = ExecClearTuple(node->ps.ps_ResultTupleSlot);
 +			return PostExecProcNodeInstr(pstate, result);
-+#else
- 			return ExecClearTuple(node->ps.ps_ResultTupleSlot);
-+#endif
 +		}
  	}
  }
  
 diff --git a/src/backend/executor/nodeBitmapAnd.c b/src/backend/executor/nodeBitmapAnd.c
-index 939907b6fcd..682bc00207a 100644
+index 939907b6fcd..09c00630975 100644
 --- a/src/backend/executor/nodeBitmapAnd.c
 +++ b/src/backend/executor/nodeBitmapAnd.c
-@@ -42,7 +42,11 @@ static TupleTableSlot *
+@@ -42,7 +42,7 @@ static TupleTableSlot *
  ExecBitmapAnd(PlanState *pstate)
  {
  	elog(ERROR, "BitmapAnd node does not support ExecProcNode call convention");
-+#ifdef DEV3
+-	return NULL;
 +	return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 	return NULL;
-+#endif
  }
  
  /* ----------------------------------------------------------------
-@@ -161,7 +165,7 @@ MultiExecBitmapAnd(BitmapAndState *node)
+@@ -161,7 +161,7 @@ MultiExecBitmapAnd(BitmapAndState *node)
  
  	/* must provide our own instrumentation support */
  	if (node->ps.instrument)
@@ -1011,49 +931,41 @@ index 939907b6fcd..682bc00207a 100644
  	return (Node *) result;
  }
 diff --git a/src/backend/executor/nodeBitmapHeapscan.c b/src/backend/executor/nodeBitmapHeapscan.c
-index bf24f3d7fe0..db09cbadab5 100644
+index bf24f3d7fe0..35dda3a2d21 100644
 --- a/src/backend/executor/nodeBitmapHeapscan.c
 +++ b/src/backend/executor/nodeBitmapHeapscan.c
-@@ -211,11 +211,22 @@ BitmapHeapRecheck(BitmapHeapScanState *node, TupleTableSlot *slot)
+@@ -211,11 +211,14 @@ BitmapHeapRecheck(BitmapHeapScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecBitmapHeapScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	BitmapHeapScanState *node = castNode(BitmapHeapScanState, pstate);
  
-+#ifdef DEV3
+-	return ExecScan(&node->ss,
+-					(ExecScanAccessMtd) BitmapHeapNext,
+-					(ExecScanRecheckMtd) BitmapHeapRecheck);
 +	result = ExecScan(&node->ss,
 +					  (ExecScanAccessMtd) BitmapHeapNext,
 +					  (ExecScanRecheckMtd) BitmapHeapRecheck);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScan(&node->ss,
- 					(ExecScanAccessMtd) BitmapHeapNext,
- 					(ExecScanRecheckMtd) BitmapHeapRecheck);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeBitmapIndexscan.c b/src/backend/executor/nodeBitmapIndexscan.c
-index abbb033881a..f4ad83ea347 100644
+index abbb033881a..a589c59e030 100644
 --- a/src/backend/executor/nodeBitmapIndexscan.c
 +++ b/src/backend/executor/nodeBitmapIndexscan.c
-@@ -38,7 +38,11 @@ static TupleTableSlot *
+@@ -38,7 +38,7 @@ static TupleTableSlot *
  ExecBitmapIndexScan(PlanState *pstate)
  {
  	elog(ERROR, "BitmapIndexScan node does not support ExecProcNode call convention");
-+#ifdef DEV3
+-	return NULL;
 +	return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 	return NULL;
-+#endif
  }
  
  /* ----------------------------------------------------------------
-@@ -115,7 +119,7 @@ MultiExecBitmapIndexScan(BitmapIndexScanState *node)
+@@ -115,7 +115,7 @@ MultiExecBitmapIndexScan(BitmapIndexScanState *node)
  
  	/* must provide our own instrumentation support */
  	if (node->ss.ps.instrument)
@@ -1063,22 +975,19 @@ index abbb033881a..f4ad83ea347 100644
  	return (Node *) tbm;
  }
 diff --git a/src/backend/executor/nodeBitmapOr.c b/src/backend/executor/nodeBitmapOr.c
-index 231760ec93d..714393c112c 100644
+index 231760ec93d..a2dda0b2053 100644
 --- a/src/backend/executor/nodeBitmapOr.c
 +++ b/src/backend/executor/nodeBitmapOr.c
-@@ -43,7 +43,11 @@ static TupleTableSlot *
+@@ -43,7 +43,7 @@ static TupleTableSlot *
  ExecBitmapOr(PlanState *pstate)
  {
  	elog(ERROR, "BitmapOr node does not support ExecProcNode call convention");
-+#ifdef DEV3
+-	return NULL;
 +	return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 	return NULL;
-+#endif
  }
  
  /* ----------------------------------------------------------------
-@@ -179,7 +183,7 @@ MultiExecBitmapOr(BitmapOrState *node)
+@@ -179,7 +179,7 @@ MultiExecBitmapOr(BitmapOrState *node)
  
  	/* must provide our own instrumentation support */
  	if (node->ps.instrument)
@@ -1088,306 +997,241 @@ index 231760ec93d..714393c112c 100644
  	return (Node *) result;
  }
 diff --git a/src/backend/executor/nodeCtescan.c b/src/backend/executor/nodeCtescan.c
-index e1675f66b43..84ca39c446b 100644
+index e1675f66b43..c3a6ebaf475 100644
 --- a/src/backend/executor/nodeCtescan.c
 +++ b/src/backend/executor/nodeCtescan.c
-@@ -159,11 +159,22 @@ CteScanRecheck(CteScanState *node, TupleTableSlot *slot)
+@@ -159,11 +159,14 @@ CteScanRecheck(CteScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecCteScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	CteScanState *node = castNode(CteScanState, pstate);
  
-+#ifdef DEV3
+-	return ExecScan(&node->ss,
+-					(ExecScanAccessMtd) CteScanNext,
+-					(ExecScanRecheckMtd) CteScanRecheck);
 +	result = ExecScan(&node->ss,
 +					  (ExecScanAccessMtd) CteScanNext,
 +					  (ExecScanRecheckMtd) CteScanRecheck);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScan(&node->ss,
- 					(ExecScanAccessMtd) CteScanNext,
- 					(ExecScanRecheckMtd) CteScanRecheck);
-+#endif
  }
  
  
 diff --git a/src/backend/executor/nodeCustom.c b/src/backend/executor/nodeCustom.c
-index ac2196b64c7..8281b9d8814 100644
+index ac2196b64c7..555a9d26814 100644
 --- a/src/backend/executor/nodeCustom.c
 +++ b/src/backend/executor/nodeCustom.c
-@@ -113,12 +113,20 @@ ExecInitCustomScan(CustomScan *cscan, EState *estate, int eflags)
+@@ -113,12 +113,14 @@ ExecInitCustomScan(CustomScan *cscan, EState *estate, int eflags)
  static TupleTableSlot *
  ExecCustomScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	CustomScanState *node = castNode(CustomScanState, pstate);
  
  	CHECK_FOR_INTERRUPTS();
  
  	Assert(node->methods->ExecCustomScan != NULL);
-+#ifdef DEV3
+-	return node->methods->ExecCustomScan(node);
 +	result = node->methods->ExecCustomScan(node);
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return node->methods->ExecCustomScan(node);
-+#endif
  }
  
  void
 diff --git a/src/backend/executor/nodeForeignscan.c b/src/backend/executor/nodeForeignscan.c
-index 9c56c2f3acf..73eaa7b2e8c 100644
+index 9c56c2f3acf..8816df4850d 100644
 --- a/src/backend/executor/nodeForeignscan.c
 +++ b/src/backend/executor/nodeForeignscan.c
-@@ -117,6 +117,9 @@ ForeignRecheck(ForeignScanState *node, TupleTableSlot *slot)
+@@ -117,6 +117,7 @@ ForeignRecheck(ForeignScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecForeignScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	ForeignScanState *node = castNode(ForeignScanState, pstate);
  	ForeignScan *plan = (ForeignScan *) node->ss.ps.plan;
  	EState	   *estate = node->ss.ps.state;
-@@ -126,11 +129,23 @@ ExecForeignScan(PlanState *pstate)
+@@ -126,11 +127,13 @@ ExecForeignScan(PlanState *pstate)
  	 * irrelevant for EvalPlanQual rechecking
  	 */
  	if (estate->es_epq_active != NULL && plan->operation != CMD_SELECT)
-+#ifdef DEV3
+-		return NULL;
 +		return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 		return NULL;
-+#endif
  
-+#ifdef DEV3
+-	return ExecScan(&node->ss,
+-					(ExecScanAccessMtd) ForeignNext,
+-					(ExecScanRecheckMtd) ForeignRecheck);
 +	result = ExecScan(&node->ss,
 +					  (ExecScanAccessMtd) ForeignNext,
 +					  (ExecScanRecheckMtd) ForeignRecheck);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScan(&node->ss,
- 					(ExecScanAccessMtd) ForeignNext,
- 					(ExecScanRecheckMtd) ForeignRecheck);
-+#endif
  }
  
  
 diff --git a/src/backend/executor/nodeFunctionscan.c b/src/backend/executor/nodeFunctionscan.c
-index 644363582d9..8e13cc7e61a 100644
+index 644363582d9..fadd9857756 100644
 --- a/src/backend/executor/nodeFunctionscan.c
 +++ b/src/backend/executor/nodeFunctionscan.c
-@@ -264,11 +264,22 @@ FunctionRecheck(FunctionScanState *node, TupleTableSlot *slot)
+@@ -264,11 +264,14 @@ FunctionRecheck(FunctionScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecFunctionScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	FunctionScanState *node = castNode(FunctionScanState, pstate);
  
-+#ifdef DEV3
+-	return ExecScan(&node->ss,
+-					(ExecScanAccessMtd) FunctionNext,
+-					(ExecScanRecheckMtd) FunctionRecheck);
 +	result = ExecScan(&node->ss,
 +					  (ExecScanAccessMtd) FunctionNext,
 +					  (ExecScanRecheckMtd) FunctionRecheck);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScan(&node->ss,
- 					(ExecScanAccessMtd) FunctionNext,
- 					(ExecScanRecheckMtd) FunctionRecheck);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeGather.c b/src/backend/executor/nodeGather.c
-index dc7d1830259..d630771c2d6 100644
+index dc7d1830259..2532a6bab4c 100644
 --- a/src/backend/executor/nodeGather.c
 +++ b/src/backend/executor/nodeGather.c
-@@ -139,6 +139,9 @@ ExecGather(PlanState *pstate)
+@@ -139,6 +139,7 @@ ExecGather(PlanState *pstate)
  	GatherState *node = castNode(GatherState, pstate);
  	TupleTableSlot *slot;
  	ExprContext *econtext;
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  
  	CHECK_FOR_INTERRUPTS();
  
-@@ -228,17 +231,30 @@ ExecGather(PlanState *pstate)
+@@ -228,17 +229,18 @@ ExecGather(PlanState *pstate)
  	 */
  	slot = gather_getnext(node);
  	if (TupIsNull(slot))
-+#ifdef DEV3
+-		return NULL;
 +		return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 		return NULL;
-+#endif
  
  	/* If no projection is required, we're done. */
  	if (node->ps.ps_ProjInfo == NULL)
-+#ifdef DEV3
+-		return slot;
 +		return PostExecProcNodeInstr(pstate, slot);
-+#else
- 		return slot;
-+#endif
  
  	/*
  	 * Form the result tuple using ExecProject(), and return it.
  	 */
  	econtext->ecxt_outertuple = slot;
-+#ifdef DEV3
+-	return ExecProject(node->ps.ps_ProjInfo);
 +	result = ExecProject(node->ps.ps_ProjInfo);
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecProject(node->ps.ps_ProjInfo);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeGatherMerge.c b/src/backend/executor/nodeGatherMerge.c
-index 15f84597067..e81b5868791 100644
+index 15f84597067..fc013107177 100644
 --- a/src/backend/executor/nodeGatherMerge.c
 +++ b/src/backend/executor/nodeGatherMerge.c
-@@ -185,6 +185,9 @@ ExecGatherMerge(PlanState *pstate)
+@@ -185,6 +185,7 @@ ExecGatherMerge(PlanState *pstate)
  	GatherMergeState *node = castNode(GatherMergeState, pstate);
  	TupleTableSlot *slot;
  	ExprContext *econtext;
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  
  	CHECK_FOR_INTERRUPTS();
  
-@@ -268,17 +271,30 @@ ExecGatherMerge(PlanState *pstate)
+@@ -268,17 +269,18 @@ ExecGatherMerge(PlanState *pstate)
  	 */
  	slot = gather_merge_getnext(node);
  	if (TupIsNull(slot))
-+#ifdef DEV3
+-		return NULL;
 +		return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 		return NULL;
-+#endif
  
  	/* If no projection is required, we're done. */
  	if (node->ps.ps_ProjInfo == NULL)
-+#ifdef DEV3
+-		return slot;
 +		return PostExecProcNodeInstr(pstate, slot);
-+#else
- 		return slot;
-+#endif
  
  	/*
  	 * Form the result tuple using ExecProject(), and return it.
  	 */
  	econtext->ecxt_outertuple = slot;
-+#ifdef DEV3
+-	return ExecProject(node->ps.ps_ProjInfo);
 +	result = ExecProject(node->ps.ps_ProjInfo);
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecProject(node->ps.ps_ProjInfo);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeGroup.c b/src/backend/executor/nodeGroup.c
-index 05fdd96f835..b77fbbc4b5f 100644
+index 05fdd96f835..768f7a47112 100644
 --- a/src/backend/executor/nodeGroup.c
 +++ b/src/backend/executor/nodeGroup.c
-@@ -39,6 +39,9 @@ ExecGroup(PlanState *pstate)
+@@ -39,6 +39,7 @@ ExecGroup(PlanState *pstate)
  	ExprContext *econtext;
  	TupleTableSlot *firsttupleslot;
  	TupleTableSlot *outerslot;
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  
  	CHECK_FOR_INTERRUPTS();
  
-@@ -46,7 +49,12 @@ ExecGroup(PlanState *pstate)
+@@ -46,7 +47,8 @@ ExecGroup(PlanState *pstate)
  	 * get state info from node
  	 */
  	if (node->grp_done)
-+#ifdef DEV3
+-		return NULL;
 +		return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 		return NULL;
-+#endif
 +
  	econtext = node->ss.ps.ps_ExprContext;
  
  	/*
-@@ -70,7 +78,11 @@ ExecGroup(PlanState *pstate)
+@@ -70,7 +72,7 @@ ExecGroup(PlanState *pstate)
  		{
  			/* empty input, so return nothing */
  			node->grp_done = true;
-+#ifdef DEV3
+-			return NULL;
 +			return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 			return NULL;
-+#endif
  		}
  		/* Copy tuple into firsttupleslot */
  		ExecCopySlot(firsttupleslot, outerslot);
-@@ -90,7 +102,12 @@ ExecGroup(PlanState *pstate)
+@@ -90,7 +92,8 @@ ExecGroup(PlanState *pstate)
  			/*
  			 * Form and return a projection tuple using the first input tuple.
  			 */
-+#ifdef DEV3
+-			return ExecProject(node->ss.ps.ps_ProjInfo);
 +			result = ExecProject(node->ss.ps.ps_ProjInfo);
 +			return PostExecProcNodeInstr(pstate, result);
-+#else
- 			return ExecProject(node->ss.ps.ps_ProjInfo);
-+#endif
  		}
  		else
  			InstrCountFiltered1(node, 1);
-@@ -113,7 +130,11 @@ ExecGroup(PlanState *pstate)
+@@ -113,7 +116,7 @@ ExecGroup(PlanState *pstate)
  			{
  				/* no more groups, so we're done */
  				node->grp_done = true;
-+#ifdef DEV3
+-				return NULL;
 +				return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 				return NULL;
-+#endif
  			}
  
  			/*
-@@ -143,7 +164,12 @@ ExecGroup(PlanState *pstate)
+@@ -143,7 +146,8 @@ ExecGroup(PlanState *pstate)
  			/*
  			 * Form and return a projection tuple using the first input tuple.
  			 */
-+#ifdef DEV3
+-			return ExecProject(node->ss.ps.ps_ProjInfo);
 +			result = ExecProject(node->ss.ps.ps_ProjInfo);
 +			return PostExecProcNodeInstr(pstate, result);
-+#else
- 			return ExecProject(node->ss.ps.ps_ProjInfo);
-+#endif
  		}
  		else
  			InstrCountFiltered1(node, 1);
 diff --git a/src/backend/executor/nodeHash.c b/src/backend/executor/nodeHash.c
-index 8d2201ab67f..9e2af970ed7 100644
+index 8d2201ab67f..5d5c62f2ccf 100644
 --- a/src/backend/executor/nodeHash.c
 +++ b/src/backend/executor/nodeHash.c
-@@ -91,7 +91,11 @@ static TupleTableSlot *
+@@ -91,7 +91,7 @@ static TupleTableSlot *
  ExecHash(PlanState *pstate)
  {
  	elog(ERROR, "Hash node does not support ExecProcNode call convention");
-+#ifdef DEV3
+-	return NULL;
 +	return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 	return NULL;
-+#endif
  }
  
  /* ----------------------------------------------------------------
-@@ -115,7 +119,7 @@ MultiExecHash(HashState *node)
+@@ -115,7 +115,7 @@ MultiExecHash(HashState *node)
  
  	/* must provide our own instrumentation support */
  	if (node->ps.instrument)
@@ -1397,664 +1241,514 @@ index 8d2201ab67f..9e2af970ed7 100644
  	/*
  	 * We do not return the hash table directly because it's not a subtype of
 diff --git a/src/backend/executor/nodeHashjoin.c b/src/backend/executor/nodeHashjoin.c
-index 5661ad76830..6a15200b3dc 100644
+index 5661ad76830..9d8480b9312 100644
 --- a/src/backend/executor/nodeHashjoin.c
 +++ b/src/backend/executor/nodeHashjoin.c
-@@ -683,11 +683,20 @@ ExecHashJoinImpl(PlanState *pstate, bool parallel)
+@@ -683,11 +683,14 @@ ExecHashJoinImpl(PlanState *pstate, bool parallel)
  static TupleTableSlot *			/* return: a tuple or NULL */
  ExecHashJoin(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
 +
  	/*
  	 * On sufficiently smart compilers this should be inlined with the
  	 * parallel-aware branches removed.
  	 */
-+#ifdef DEV3
+-	return ExecHashJoinImpl(pstate, false);
 +	result = ExecHashJoinImpl(pstate, false);
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecHashJoinImpl(pstate, false);
-+#endif
  }
  
  /* ----------------------------------------------------------------
-@@ -699,11 +708,20 @@ ExecHashJoin(PlanState *pstate)
+@@ -699,11 +702,14 @@ ExecHashJoin(PlanState *pstate)
  static TupleTableSlot *			/* return: a tuple or NULL */
  ExecParallelHashJoin(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
 +
  	/*
  	 * On sufficiently smart compilers this should be inlined with the
  	 * parallel-oblivious branches removed.
  	 */
-+#ifdef DEV3
+-	return ExecHashJoinImpl(pstate, true);
 +	result = ExecHashJoinImpl(pstate, true);
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecHashJoinImpl(pstate, true);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeIncrementalSort.c b/src/backend/executor/nodeIncrementalSort.c
-index 975b0397e7a..a232cec4841 100644
+index 975b0397e7a..37283a0f616 100644
 --- a/src/backend/executor/nodeIncrementalSort.c
 +++ b/src/backend/executor/nodeIncrementalSort.c
-@@ -543,7 +543,12 @@ ExecIncrementalSort(PlanState *pstate)
+@@ -543,7 +543,8 @@ ExecIncrementalSort(PlanState *pstate)
  			 * check directly, but we need it for any plan where the outer
  			 * node will fail when trying to fetch too many tuples.
  			 */
-+#ifdef DEV3
+-			return slot;
 +			return PostExecProcNodeInstr(pstate, slot);
-+#else
- 			return slot;
-+#endif
 +
  		else if (node->n_fullsort_remaining > 0)
  		{
  			/*
-@@ -962,7 +967,12 @@ ExecIncrementalSort(PlanState *pstate)
+@@ -962,7 +963,8 @@ ExecIncrementalSort(PlanState *pstate)
  	slot = node->ss.ps.ps_ResultTupleSlot;
  	(void) tuplesort_gettupleslot(read_sortstate, ScanDirectionIsForward(dir),
  								  false, slot, NULL);
+-	return slot;
 +
-+#ifdef DEV3
 +	return PostExecProcNodeInstr(pstate, slot);
-+#else
- 	return slot;
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeIndexonlyscan.c b/src/backend/executor/nodeIndexonlyscan.c
-index f464cca9507..8e0915af79e 100644
+index f464cca9507..831b62ed1c6 100644
 --- a/src/backend/executor/nodeIndexonlyscan.c
 +++ b/src/backend/executor/nodeIndexonlyscan.c
-@@ -336,6 +336,10 @@ IndexOnlyRecheck(IndexOnlyScanState *node, TupleTableSlot *slot)
+@@ -336,6 +336,7 @@ IndexOnlyRecheck(IndexOnlyScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecIndexOnlyScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
-+
  	IndexOnlyScanState *node = castNode(IndexOnlyScanState, pstate);
  
  	/*
-@@ -344,9 +348,17 @@ ExecIndexOnlyScan(PlanState *pstate)
+@@ -344,9 +345,11 @@ ExecIndexOnlyScan(PlanState *pstate)
  	if (node->ioss_NumRuntimeKeys != 0 && !node->ioss_RuntimeKeysReady)
  		ExecReScan((PlanState *) node);
  
-+#ifdef DEV3
+-	return ExecScan(&node->ss,
+-					(ExecScanAccessMtd) IndexOnlyNext,
+-					(ExecScanRecheckMtd) IndexOnlyRecheck);
 +	result = ExecScan(&node->ss,
 +					  (ExecScanAccessMtd) IndexOnlyNext,
 +					  (ExecScanRecheckMtd) IndexOnlyRecheck);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScan(&node->ss,
- 					(ExecScanAccessMtd) IndexOnlyNext,
- 					(ExecScanRecheckMtd) IndexOnlyRecheck);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeIndexscan.c b/src/backend/executor/nodeIndexscan.c
-index 7fcaa37fe62..3425baeb2a2 100644
+index 7fcaa37fe62..1eaa5f0ba3f 100644
 --- a/src/backend/executor/nodeIndexscan.c
 +++ b/src/backend/executor/nodeIndexscan.c
-@@ -521,6 +521,9 @@ static TupleTableSlot *
+@@ -521,6 +521,7 @@ static TupleTableSlot *
  ExecIndexScan(PlanState *pstate)
  {
  	IndexScanState *node = castNode(IndexScanState, pstate);
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  
  	/*
  	 * If we have runtime keys and they've not already been set up, do it now.
-@@ -529,13 +532,33 @@ ExecIndexScan(PlanState *pstate)
+@@ -529,13 +530,21 @@ ExecIndexScan(PlanState *pstate)
  		ExecReScan((PlanState *) node);
  
  	if (node->iss_NumOrderByKeys > 0)
+-		return ExecScan(&node->ss,
+-						(ExecScanAccessMtd) IndexNextWithReorder,
+-						(ExecScanRecheckMtd) IndexRecheck);
 +	{
-+#ifdef DEV3
 +		result = ExecScan(&node->ss,
 +						  (ExecScanAccessMtd) IndexNextWithReorder,
 +						  (ExecScanRecheckMtd) IndexRecheck);
 +
 +		return PostExecProcNodeInstr(pstate, result);
-+#else
- 		return ExecScan(&node->ss,
- 						(ExecScanAccessMtd) IndexNextWithReorder,
- 						(ExecScanRecheckMtd) IndexRecheck);
-+#endif
 +	}
  	else
+-		return ExecScan(&node->ss,
+-						(ExecScanAccessMtd) IndexNext,
+-						(ExecScanRecheckMtd) IndexRecheck);
 +	{
-+#ifdef DEV3
 +		result = ExecScan(&node->ss,
 +						  (ExecScanAccessMtd) IndexNext,
 +						  (ExecScanRecheckMtd) IndexRecheck);
 +
 +		return PostExecProcNodeInstr(pstate, result);
-+#else
- 		return ExecScan(&node->ss,
- 						(ExecScanAccessMtd) IndexNext,
- 						(ExecScanRecheckMtd) IndexRecheck);
-+#endif
 +	}
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeLimit.c b/src/backend/executor/nodeLimit.c
-index f957da4470e..76280b4e5ea 100644
+index f957da4470e..9be14360944 100644
 --- a/src/backend/executor/nodeLimit.c
 +++ b/src/backend/executor/nodeLimit.c
-@@ -76,7 +76,11 @@ ExecLimit(PlanState *pstate)
+@@ -76,7 +76,7 @@ ExecLimit(PlanState *pstate)
  			 * If backwards scan, just return NULL without changing state.
  			 */
  			if (!ScanDirectionIsForward(direction))
-+#ifdef DEV3
+-				return NULL;
 +				return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 				return NULL;
-+#endif
  
  			/*
  			 * Check for empty window; if so, treat like empty subplan.
-@@ -84,7 +88,11 @@ ExecLimit(PlanState *pstate)
+@@ -84,7 +84,7 @@ ExecLimit(PlanState *pstate)
  			if (node->count <= 0 && !node->noCount)
  			{
  				node->lstate = LIMIT_EMPTY;
-+#ifdef DEV3
+-				return NULL;
 +				return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 				return NULL;
-+#endif
  			}
  
  			/*
-@@ -100,7 +108,11 @@ ExecLimit(PlanState *pstate)
+@@ -100,7 +100,7 @@ ExecLimit(PlanState *pstate)
  					 * any output at all.
  					 */
  					node->lstate = LIMIT_EMPTY;
-+#ifdef DEV3
+-					return NULL;
 +					return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 					return NULL;
-+#endif
  				}
  
  				/*
-@@ -129,7 +141,11 @@ ExecLimit(PlanState *pstate)
+@@ -129,7 +129,7 @@ ExecLimit(PlanState *pstate)
  			 * The subplan is known to return no tuples (or not more than
  			 * OFFSET tuples, in general).  So we return no tuples.
  			 */
-+#ifdef DEV3
+-			return NULL;
 +			return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 			return NULL;
-+#endif
  
  		case LIMIT_INWINDOW:
  			if (ScanDirectionIsForward(direction))
-@@ -156,7 +172,11 @@ ExecLimit(PlanState *pstate)
+@@ -156,7 +156,7 @@ ExecLimit(PlanState *pstate)
  					if (node->limitOption == LIMIT_OPTION_COUNT)
  					{
  						node->lstate = LIMIT_WINDOWEND;
-+#ifdef DEV3
+-						return NULL;
 +						return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 						return NULL;
-+#endif
  					}
  					else
  					{
-@@ -173,7 +193,11 @@ ExecLimit(PlanState *pstate)
+@@ -173,7 +173,7 @@ ExecLimit(PlanState *pstate)
  					if (TupIsNull(slot))
  					{
  						node->lstate = LIMIT_SUBPLANEOF;
-+#ifdef DEV3
+-						return NULL;
 +						return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 						return NULL;
-+#endif
  					}
  
  					/*
-@@ -200,7 +224,11 @@ ExecLimit(PlanState *pstate)
+@@ -200,7 +200,7 @@ ExecLimit(PlanState *pstate)
  				if (node->position <= node->offset + 1)
  				{
  					node->lstate = LIMIT_WINDOWSTART;
-+#ifdef DEV3
+-					return NULL;
 +					return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 					return NULL;
-+#endif
  				}
  
  				/*
-@@ -228,7 +256,11 @@ ExecLimit(PlanState *pstate)
+@@ -228,7 +228,7 @@ ExecLimit(PlanState *pstate)
  				if (TupIsNull(slot))
  				{
  					node->lstate = LIMIT_SUBPLANEOF;
-+#ifdef DEV3
+-					return NULL;
 +					return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 					return NULL;
-+#endif
  				}
  
  				/*
-@@ -245,7 +277,11 @@ ExecLimit(PlanState *pstate)
+@@ -245,7 +245,7 @@ ExecLimit(PlanState *pstate)
  				else
  				{
  					node->lstate = LIMIT_WINDOWEND;
-+#ifdef DEV3
+-					return NULL;
 +					return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 					return NULL;
-+#endif
  				}
  			}
  			else
-@@ -257,7 +293,11 @@ ExecLimit(PlanState *pstate)
+@@ -257,7 +257,7 @@ ExecLimit(PlanState *pstate)
  				if (node->position <= node->offset + 1)
  				{
  					node->lstate = LIMIT_WINDOWSTART;
-+#ifdef DEV3
+-					return NULL;
 +					return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 					return NULL;
-+#endif
  				}
  
  				/*
-@@ -275,7 +315,11 @@ ExecLimit(PlanState *pstate)
+@@ -275,7 +275,7 @@ ExecLimit(PlanState *pstate)
  
  		case LIMIT_SUBPLANEOF:
  			if (ScanDirectionIsForward(direction))
-+#ifdef DEV3
+-				return NULL;
 +				return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 				return NULL;
-+#endif
  
  			/*
  			 * Backing up from subplan EOF, so re-fetch previous tuple; there
-@@ -291,7 +335,11 @@ ExecLimit(PlanState *pstate)
+@@ -291,7 +291,7 @@ ExecLimit(PlanState *pstate)
  
  		case LIMIT_WINDOWEND:
  			if (ScanDirectionIsForward(direction))
-+#ifdef DEV3
+-				return NULL;
 +				return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 				return NULL;
-+#endif
  
  			/*
  			 * We already past one position to detect ties so re-fetch
-@@ -320,7 +368,11 @@ ExecLimit(PlanState *pstate)
+@@ -320,7 +320,7 @@ ExecLimit(PlanState *pstate)
  
  		case LIMIT_WINDOWSTART:
  			if (!ScanDirectionIsForward(direction))
-+#ifdef DEV3
+-				return NULL;
 +				return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 				return NULL;
-+#endif
  
  			/*
  			 * Advancing after having backed off window start: simply
-@@ -341,7 +393,11 @@ ExecLimit(PlanState *pstate)
+@@ -341,7 +341,7 @@ ExecLimit(PlanState *pstate)
  	/* Return the current tuple */
  	Assert(!TupIsNull(slot));
  
-+#ifdef DEV3
+-	return slot;
 +	return PostExecProcNodeInstr(pstate, slot);
-+#else
- 	return slot;
-+#endif
  }
  
  /*
 diff --git a/src/backend/executor/nodeLockRows.c b/src/backend/executor/nodeLockRows.c
-index a8afbf93b48..2c42756f297 100644
+index a8afbf93b48..d569b2fa017 100644
 --- a/src/backend/executor/nodeLockRows.c
 +++ b/src/backend/executor/nodeLockRows.c
-@@ -62,7 +62,11 @@ lnext:
+@@ -62,7 +62,7 @@ lnext:
  	{
  		/* Release any resources held by EPQ mechanism before exiting */
  		EvalPlanQualEnd(&node->lr_epqstate);
-+#ifdef DEV3
+-		return NULL;
 +		return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 		return NULL;
-+#endif
  	}
  
  	/* We don't need EvalPlanQual unless we get updated tuple version(s) */
-@@ -277,7 +281,11 @@ lnext:
+@@ -277,7 +277,7 @@ lnext:
  	}
  
  	/* Got all locks, so return the current tuple */
-+#ifdef DEV3
+-	return slot;
 +	return PostExecProcNodeInstr(pstate, slot);
-+#else
- 	return slot;
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeMaterial.c b/src/backend/executor/nodeMaterial.c
-index 9798bb75365..00015e3537d 100644
+index 9798bb75365..b0179dcc0c5 100644
 --- a/src/backend/executor/nodeMaterial.c
 +++ b/src/backend/executor/nodeMaterial.c
-@@ -45,6 +45,10 @@ ExecMaterial(PlanState *pstate)
+@@ -45,6 +45,7 @@ ExecMaterial(PlanState *pstate)
  	Tuplestorestate *tuplestorestate;
  	bool		eof_tuplestore;
  	TupleTableSlot *slot;
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
-+
  
  	CHECK_FOR_INTERRUPTS();
  
-@@ -96,7 +100,11 @@ ExecMaterial(PlanState *pstate)
+@@ -96,7 +97,7 @@ ExecMaterial(PlanState *pstate)
  			 * fetch.
  			 */
  			if (!tuplestore_advance(tuplestorestate, forward))
-+#ifdef DEV3
-+				return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 				return NULL;	/* the tuplestore must be empty */
-+#endif
+-				return NULL;	/* the tuplestore must be empty */
++				return PostExecProcNodeInstr(pstate, NULL);	/* the tuplestore must be empty */
  		}
  		eof_tuplestore = false;
  	}
-@@ -108,7 +116,11 @@ ExecMaterial(PlanState *pstate)
+@@ -108,7 +109,8 @@ ExecMaterial(PlanState *pstate)
  	if (!eof_tuplestore)
  	{
  		if (tuplestore_gettupleslot(tuplestorestate, forward, false, slot))
-+#ifdef DEV3
+-			return slot;
 +			return PostExecProcNodeInstr(pstate, slot);
-+#else
- 			return slot;
-+#endif
++
  		if (forward)
  			eof_tuplestore = true;
  	}
-@@ -135,7 +147,11 @@ ExecMaterial(PlanState *pstate)
+@@ -135,7 +137,7 @@ ExecMaterial(PlanState *pstate)
  		if (TupIsNull(outerslot))
  		{
  			node->eof_underlying = true;
-+#ifdef DEV3
+-			return NULL;
 +			return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 			return NULL;
-+#endif
  		}
  
  		/*
-@@ -147,13 +163,22 @@ ExecMaterial(PlanState *pstate)
+@@ -147,13 +149,14 @@ ExecMaterial(PlanState *pstate)
  			tuplestore_puttupleslot(tuplestorestate, outerslot);
  
  		ExecCopySlot(slot, outerslot);
-+#ifdef DEV3
+-		return slot;
 +		return PostExecProcNodeInstr(pstate, slot);
-+#else
- 		return slot;
-+#endif
  	}
  
  	/*
  	 * Nothing left ...
  	 */
-+#ifdef DEV3
+-	return ExecClearTuple(slot);
 +	result = ExecClearTuple(slot);
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecClearTuple(slot);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeMemoize.c b/src/backend/executor/nodeMemoize.c
-index 609deb12afb..04a5d7cdac1 100644
+index 609deb12afb..a11c946d324 100644
 --- a/src/backend/executor/nodeMemoize.c
 +++ b/src/backend/executor/nodeMemoize.c
-@@ -760,12 +760,20 @@ ExecMemoize(PlanState *pstate)
+@@ -760,12 +760,12 @@ ExecMemoize(PlanState *pstate)
  						ExecStoreMinimalTuple(entry->tuplehead->mintuple,
  											  slot, false);
  
-+#ifdef DEV3
+-						return slot;
 +						return PostExecProcNodeInstr(pstate, slot);
-+#else
- 						return slot;
-+#endif
  					}
  
  					/* The cache entry is void of any tuples. */
  					node->mstatus = MEMO_END_OF_SCAN;
-+#ifdef DEV3
+-					return NULL;
 +					return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 					return NULL;
-+#endif
  				}
  
  				/* Handle cache miss */
-@@ -800,7 +808,11 @@ ExecMemoize(PlanState *pstate)
+@@ -800,7 +800,7 @@ ExecMemoize(PlanState *pstate)
  						entry->complete = true;
  
  					node->mstatus = MEMO_END_OF_SCAN;
-+#ifdef DEV3
+-					return NULL;
 +					return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 					return NULL;
-+#endif
  				}
  
  				node->entry = entry;
-@@ -835,7 +847,11 @@ ExecMemoize(PlanState *pstate)
+@@ -835,7 +835,7 @@ ExecMemoize(PlanState *pstate)
  
  				slot = node->ss.ps.ps_ResultTupleSlot;
  				ExecCopySlot(slot, outerslot);
-+#ifdef DEV3
+-				return slot;
 +				return PostExecProcNodeInstr(pstate, slot);
-+#else
- 				return slot;
-+#endif
  			}
  
  		case MEMO_CACHE_FETCH_NEXT_TUPLE:
-@@ -851,14 +867,22 @@ ExecMemoize(PlanState *pstate)
+@@ -851,14 +851,14 @@ ExecMemoize(PlanState *pstate)
  				if (node->last_tuple == NULL)
  				{
  					node->mstatus = MEMO_END_OF_SCAN;
-+#ifdef DEV3
+-					return NULL;
 +					return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 					return NULL;
-+#endif
  				}
  
  				slot = node->ss.ps.ps_ResultTupleSlot;
  				ExecStoreMinimalTuple(node->last_tuple->mintuple, slot,
  									  false);
  
-+#ifdef DEV3
+-				return slot;
 +				return PostExecProcNodeInstr(pstate, slot);
-+#else
- 				return slot;
-+#endif
  			}
  
  		case MEMO_FILLING_CACHE:
-@@ -881,7 +905,11 @@ ExecMemoize(PlanState *pstate)
+@@ -881,7 +881,7 @@ ExecMemoize(PlanState *pstate)
  					/* No more tuples.  Mark it as complete */
  					entry->complete = true;
  					node->mstatus = MEMO_END_OF_SCAN;
-+#ifdef DEV3
+-					return NULL;
 +					return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 					return NULL;
-+#endif
  				}
  
  				/*
-@@ -908,7 +936,11 @@ ExecMemoize(PlanState *pstate)
+@@ -908,7 +908,7 @@ ExecMemoize(PlanState *pstate)
  
  				slot = node->ss.ps.ps_ResultTupleSlot;
  				ExecCopySlot(slot, outerslot);
-+#ifdef DEV3
+-				return slot;
 +				return PostExecProcNodeInstr(pstate, slot);
-+#else
- 				return slot;
-+#endif
  			}
  
  		case MEMO_CACHE_BYPASS_MODE:
-@@ -925,12 +957,20 @@ ExecMemoize(PlanState *pstate)
+@@ -925,12 +925,12 @@ ExecMemoize(PlanState *pstate)
  				if (TupIsNull(outerslot))
  				{
  					node->mstatus = MEMO_END_OF_SCAN;
-+#ifdef DEV3
+-					return NULL;
 +					return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 					return NULL;
-+#endif
  				}
  
  				slot = node->ss.ps.ps_ResultTupleSlot;
  				ExecCopySlot(slot, outerslot);
-+#ifdef DEV3
+-				return slot;
 +				return PostExecProcNodeInstr(pstate, slot);
-+#else
- 				return slot;
-+#endif
  			}
  
  		case MEMO_END_OF_SCAN:
-@@ -939,12 +979,20 @@ ExecMemoize(PlanState *pstate)
+@@ -939,12 +939,13 @@ ExecMemoize(PlanState *pstate)
  			 * We've already returned NULL for this scan, but just in case
  			 * something calls us again by mistake.
  			 */
-+#ifdef DEV3
+-			return NULL;
 +			return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 			return NULL;
-+#endif
  
  		default:
  			elog(ERROR, "unrecognized memoize state: %d",
  				 (int) node->mstatus);
-+#ifdef DEV3
+-			return NULL;
++
 +			return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 			return NULL;
-+#endif
  	}							/* switch */
  }
  
 diff --git a/src/backend/executor/nodeMergeAppend.c b/src/backend/executor/nodeMergeAppend.c
-index 405e8f94285..e6ec2f868aa 100644
+index 405e8f94285..0a9fb06d7c8 100644
 --- a/src/backend/executor/nodeMergeAppend.c
 +++ b/src/backend/executor/nodeMergeAppend.c
-@@ -224,7 +224,14 @@ ExecMergeAppend(PlanState *pstate)
+@@ -224,7 +224,10 @@ ExecMergeAppend(PlanState *pstate)
  	{
  		/* Nothing to do if all subplans were pruned */
  		if (node->ms_nplans == 0)
-+#ifdef DEV3
+-			return ExecClearTuple(node->ps.ps_ResultTupleSlot);
 +		{
 +			result = ExecClearTuple(node->ps.ps_ResultTupleSlot);
 +			return PostExecProcNodeInstr(pstate, result);
 +		}
-+#else
- 			return ExecClearTuple(node->ps.ps_ResultTupleSlot);
-+#endif
  
  		/*
  		 * If we've yet to determine the valid subplans then do so now.  If
-@@ -278,7 +285,11 @@ ExecMergeAppend(PlanState *pstate)
+@@ -278,7 +281,7 @@ ExecMergeAppend(PlanState *pstate)
  		result = node->ms_slots[i];
  	}
  
-+#ifdef DEV3
+-	return result;
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return result;
-+#endif
  }
  
  /*
 diff --git a/src/backend/executor/nodeMergejoin.c b/src/backend/executor/nodeMergejoin.c
-index a233313128a..1ba8ad063fc 100644
+index a233313128a..d757396c4c9 100644
 --- a/src/backend/executor/nodeMergejoin.c
 +++ b/src/backend/executor/nodeMergejoin.c
-@@ -670,7 +670,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -670,7 +670,7 @@ ExecMergeJoin(PlanState *pstate)
  
  							result = MJFillOuter(node);
  							if (result)
-+#ifdef DEV3
+-								return result;
 +								return PostExecProcNodeInstr(pstate, result);
-+#else
- 								return result;
-+#endif
  						}
  						break;
  					case MJEVAL_ENDOFJOIN:
-@@ -688,7 +692,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -688,7 +688,7 @@ ExecMergeJoin(PlanState *pstate)
  							break;
  						}
  						/* Otherwise we're done. */
-+#ifdef DEV3
+-						return NULL;
 +						return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 						return NULL;
-+#endif
  				}
  				break;
  
-@@ -725,7 +733,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -725,7 +725,7 @@ ExecMergeJoin(PlanState *pstate)
  
  							result = MJFillInner(node);
  							if (result)
-+#ifdef DEV3
+-								return result;
 +								return PostExecProcNodeInstr(pstate, result);
-+#else
- 								return result;
-+#endif
  						}
  						break;
  					case MJEVAL_ENDOFJOIN:
-@@ -745,7 +757,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -745,7 +745,7 @@ ExecMergeJoin(PlanState *pstate)
  							break;
  						}
  						/* Otherwise we're done. */
-+#ifdef DEV3
+-						return NULL;
 +						return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 						return NULL;
-+#endif
  				}
  				break;
  
-@@ -822,13 +838,22 @@ ExecMergeJoin(PlanState *pstate)
+@@ -822,13 +822,16 @@ ExecMergeJoin(PlanState *pstate)
  
  					if (qualResult)
  					{
-+#ifdef DEV3
 +						TupleTableSlot *result;
-+#endif
 +
  						/*
  						 * qualification succeeded.  now form the desired
@@ -2062,530 +1756,413 @@ index a233313128a..1ba8ad063fc 100644
  						 */
  						MJ_printf("ExecMergeJoin: returning tuple\n");
  
-+#ifdef DEV3
+-						return ExecProject(node->js.ps.ps_ProjInfo);
 +						result = ExecProject(node->js.ps.ps_ProjInfo);
 +						return PostExecProcNodeInstr(pstate, result);
-+#else
- 						return ExecProject(node->js.ps.ps_ProjInfo);
-+#endif
  					}
  					else
  						InstrCountFiltered2(node, 1);
-@@ -860,7 +885,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -860,7 +863,7 @@ ExecMergeJoin(PlanState *pstate)
  
  					result = MJFillInner(node);
  					if (result)
-+#ifdef DEV3
+-						return result;
 +						return PostExecProcNodeInstr(pstate, result);
-+#else
- 						return result;
-+#endif
  				}
  
  				/*
-@@ -961,7 +990,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -961,7 +964,7 @@ ExecMergeJoin(PlanState *pstate)
  
  					result = MJFillOuter(node);
  					if (result)
-+#ifdef DEV3
+-						return result;
 +						return PostExecProcNodeInstr(pstate, result);
-+#else
- 						return result;
-+#endif
  				}
  
  				/*
-@@ -997,7 +1030,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -997,7 +1000,7 @@ ExecMergeJoin(PlanState *pstate)
  							break;
  						}
  						/* Otherwise we're done. */
-+#ifdef DEV3
+-						return NULL;
 +						return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 						return NULL;
-+#endif
  				}
  				break;
  
-@@ -1138,7 +1175,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -1138,7 +1141,7 @@ ExecMergeJoin(PlanState *pstate)
  								break;
  							}
  							/* Otherwise we're done. */
-+#ifdef DEV3
+-							return NULL;
 +							return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 							return NULL;
-+#endif
  					}
  				}
  				else			/* compareResult < 0 should not happen */
-@@ -1223,7 +1264,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -1223,7 +1226,7 @@ ExecMergeJoin(PlanState *pstate)
  
  					result = MJFillOuter(node);
  					if (result)
-+#ifdef DEV3
+-						return result;
 +						return PostExecProcNodeInstr(pstate, result);
-+#else
- 						return result;
-+#endif
  				}
  
  				/*
-@@ -1259,7 +1304,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -1259,7 +1262,7 @@ ExecMergeJoin(PlanState *pstate)
  							break;
  						}
  						/* Otherwise we're done. */
-+#ifdef DEV3
+-						return NULL;
 +						return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 						return NULL;
-+#endif
  				}
  				break;
  
-@@ -1285,7 +1334,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -1285,7 +1288,7 @@ ExecMergeJoin(PlanState *pstate)
  
  					result = MJFillInner(node);
  					if (result)
-+#ifdef DEV3
+-						return result;
 +						return PostExecProcNodeInstr(pstate, result);
-+#else
- 						return result;
-+#endif
  				}
  
  				/* Mark before advancing, if wanted */
-@@ -1329,7 +1382,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -1329,7 +1332,7 @@ ExecMergeJoin(PlanState *pstate)
  							break;
  						}
  						/* Otherwise we're done. */
-+#ifdef DEV3
+-						return NULL;
 +						return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 						return NULL;
-+#endif
  				}
  				break;
  
-@@ -1355,7 +1412,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -1355,7 +1358,7 @@ ExecMergeJoin(PlanState *pstate)
  
  					result = MJFillInner(node);
  					if (result)
-+#ifdef DEV3
+-						return result;
 +						return PostExecProcNodeInstr(pstate, result);
-+#else
- 						return result;
-+#endif
  				}
  
  				/* Mark before advancing, if wanted */
-@@ -1373,7 +1434,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -1373,7 +1376,7 @@ ExecMergeJoin(PlanState *pstate)
  				if (TupIsNull(innerTupleSlot))
  				{
  					MJ_printf("ExecMergeJoin: end of inner subplan\n");
-+#ifdef DEV3
+-					return NULL;
 +					return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 					return NULL;
-+#endif
  				}
  
  				/* Else remain in ENDOUTER state and process next tuple. */
-@@ -1401,7 +1466,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -1401,7 +1404,7 @@ ExecMergeJoin(PlanState *pstate)
  
  					result = MJFillOuter(node);
  					if (result)
-+#ifdef DEV3
+-						return result;
 +						return PostExecProcNodeInstr(pstate, result);
-+#else
- 						return result;
-+#endif
  				}
  
  				/*
-@@ -1415,7 +1484,11 @@ ExecMergeJoin(PlanState *pstate)
+@@ -1415,7 +1418,7 @@ ExecMergeJoin(PlanState *pstate)
  				if (TupIsNull(outerTupleSlot))
  				{
  					MJ_printf("ExecMergeJoin: end of outer subplan\n");
-+#ifdef DEV3
+-					return NULL;
 +					return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 					return NULL;
-+#endif
  				}
  
  				/* Else remain in ENDINNER state and process next tuple. */
 diff --git a/src/backend/executor/nodeModifyTable.c b/src/backend/executor/nodeModifyTable.c
-index 7c6c2c1f6e4..99909638f9c 100644
+index 7c6c2c1f6e4..1cece834ae8 100644
 --- a/src/backend/executor/nodeModifyTable.c
 +++ b/src/backend/executor/nodeModifyTable.c
-@@ -4172,7 +4172,11 @@ ExecModifyTable(PlanState *pstate)
+@@ -4172,7 +4172,7 @@ ExecModifyTable(PlanState *pstate)
  	 * extra times.
  	 */
  	if (node->mt_done)
-+#ifdef DEV3
+-		return NULL;
 +		return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 		return NULL;
-+#endif
  
  	/*
  	 * On first call, fire BEFORE STATEMENT triggers before proceeding.
-@@ -4234,7 +4238,11 @@ ExecModifyTable(PlanState *pstate)
+@@ -4234,7 +4234,7 @@ ExecModifyTable(PlanState *pstate)
  			 * continue the work on next call.
  			 */
  			if (slot)
-+#ifdef DEV3
+-				return slot;
 +				return PostExecProcNodeInstr(pstate, slot);
-+#else
- 				return slot;
-+#endif
  
  			continue;			/* continue with the next tuple */
  		}
-@@ -4282,7 +4290,11 @@ ExecModifyTable(PlanState *pstate)
+@@ -4282,7 +4282,7 @@ ExecModifyTable(PlanState *pstate)
  					 * We'll continue the work on next call.
  					 */
  					if (slot)
-+#ifdef DEV3
+-						return slot;
 +						return PostExecProcNodeInstr(pstate, slot);
-+#else
- 						return slot;
-+#endif
  
  					continue;	/* continue with the next tuple */
  				}
-@@ -4319,7 +4331,11 @@ ExecModifyTable(PlanState *pstate)
+@@ -4319,7 +4319,7 @@ ExecModifyTable(PlanState *pstate)
  			slot = ExecProcessReturning(&context, resultRelInfo, operation,
  										NULL, NULL, context.planSlot);
  
-+#ifdef DEV3
+-			return slot;
 +			return PostExecProcNodeInstr(pstate, slot);
-+#else
- 			return slot;
-+#endif
  		}
  
  		EvalPlanQualSetSlot(&node->mt_epqstate, context.planSlot);
-@@ -4375,7 +4391,11 @@ ExecModifyTable(PlanState *pstate)
+@@ -4375,7 +4375,7 @@ ExecModifyTable(PlanState *pstate)
  						 * caller.  We'll continue the work on next call.
  						 */
  						if (slot)
-+#ifdef DEV3
+-							return slot;
 +							return PostExecProcNodeInstr(pstate, slot);
-+#else
- 							return slot;
-+#endif
  
  						continue;	/* continue with the next tuple */
  					}
-@@ -4432,7 +4452,11 @@ ExecModifyTable(PlanState *pstate)
+@@ -4432,7 +4432,7 @@ ExecModifyTable(PlanState *pstate)
  						 * caller.  We'll continue the work on next call.
  						 */
  						if (slot)
-+#ifdef DEV3
+-							return slot;
 +							return PostExecProcNodeInstr(pstate, slot);
-+#else
- 							return slot;
-+#endif
  
  						continue;	/* continue with the next tuple */
  					}
-@@ -4533,7 +4557,11 @@ ExecModifyTable(PlanState *pstate)
+@@ -4533,7 +4533,7 @@ ExecModifyTable(PlanState *pstate)
  		 * the work on next call.
  		 */
  		if (slot)
-+#ifdef DEV3
+-			return slot;
 +			return PostExecProcNodeInstr(pstate, slot);
-+#else
- 			return slot;
-+#endif
  	}
  
  	/*
-@@ -4549,7 +4577,11 @@ ExecModifyTable(PlanState *pstate)
+@@ -4549,7 +4549,7 @@ ExecModifyTable(PlanState *pstate)
  
  	node->mt_done = true;
  
-+#ifdef DEV3
+-	return NULL;
 +	return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 	return NULL;
-+#endif
  }
  
  /*
 diff --git a/src/backend/executor/nodeNamedtuplestorescan.c b/src/backend/executor/nodeNamedtuplestorescan.c
-index 047788d9e4e..828d545d221 100644
+index 047788d9e4e..70e945eeee5 100644
 --- a/src/backend/executor/nodeNamedtuplestorescan.c
 +++ b/src/backend/executor/nodeNamedtuplestorescan.c
-@@ -66,11 +66,22 @@ NamedTuplestoreScanRecheck(NamedTuplestoreScanState *node, TupleTableSlot *slot)
+@@ -66,11 +66,14 @@ NamedTuplestoreScanRecheck(NamedTuplestoreScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecNamedTuplestoreScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	NamedTuplestoreScanState *node = castNode(NamedTuplestoreScanState, pstate);
  
-+#ifdef DEV3
+-	return ExecScan(&node->ss,
+-					(ExecScanAccessMtd) NamedTuplestoreScanNext,
+-					(ExecScanRecheckMtd) NamedTuplestoreScanRecheck);
 +	result = ExecScan(&node->ss,
 +					  (ExecScanAccessMtd) NamedTuplestoreScanNext,
 +					  (ExecScanRecheckMtd) NamedTuplestoreScanRecheck);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScan(&node->ss,
- 					(ExecScanAccessMtd) NamedTuplestoreScanNext,
- 					(ExecScanRecheckMtd) NamedTuplestoreScanRecheck);
-+#endif
  }
  
  
 diff --git a/src/backend/executor/nodeNestloop.c b/src/backend/executor/nodeNestloop.c
-index 5cd1a251625..9f5ed0e837d 100644
+index 5cd1a251625..da8a94b4c85 100644
 --- a/src/backend/executor/nodeNestloop.c
 +++ b/src/backend/executor/nodeNestloop.c
-@@ -69,6 +69,9 @@ ExecNestLoop(PlanState *pstate)
+@@ -69,6 +69,7 @@ ExecNestLoop(PlanState *pstate)
  	ExprState  *otherqual;
  	ExprContext *econtext;
  	ListCell   *lc;
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  
  	CHECK_FOR_INTERRUPTS();
  
-@@ -113,7 +116,11 @@ ExecNestLoop(PlanState *pstate)
+@@ -113,7 +114,7 @@ ExecNestLoop(PlanState *pstate)
  			if (TupIsNull(outerTupleSlot))
  			{
  				ENL1_printf("no outer tuple, ending join");
-+#ifdef DEV3
+-				return NULL;
 +				return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 				return NULL;
-+#endif
  			}
  
  			ENL1_printf("saving new outer tuple information");
-@@ -188,7 +195,13 @@ ExecNestLoop(PlanState *pstate)
+@@ -188,7 +189,8 @@ ExecNestLoop(PlanState *pstate)
  					 */
  					ENL1_printf("qualification succeeded, projecting tuple");
  
-+#ifdef DEV3
+-					return ExecProject(node->js.ps.ps_ProjInfo);
 +					result = ExecProject(node->js.ps.ps_ProjInfo);
 +					return PostExecProcNodeInstr(pstate, result);
-+#else
- 					return ExecProject(node->js.ps.ps_ProjInfo);
-+#endif
-+
  				}
  				else
  					InstrCountFiltered2(node, 1);
-@@ -237,7 +250,12 @@ ExecNestLoop(PlanState *pstate)
+@@ -237,7 +239,8 @@ ExecNestLoop(PlanState *pstate)
  				 */
  				ENL1_printf("qualification succeeded, projecting tuple");
  
-+#ifdef DEV3
+-				return ExecProject(node->js.ps.ps_ProjInfo);
 +				result = ExecProject(node->js.ps.ps_ProjInfo);
 +				return PostExecProcNodeInstr(pstate, result);
-+#else
- 				return ExecProject(node->js.ps.ps_ProjInfo);
-+#endif
  			}
  			else
  				InstrCountFiltered2(node, 1);
 diff --git a/src/backend/executor/nodeProjectSet.c b/src/backend/executor/nodeProjectSet.c
-index 880f39fb2ff..9e3c7dcda37 100644
+index 880f39fb2ff..3d2fd3569ec 100644
 --- a/src/backend/executor/nodeProjectSet.c
 +++ b/src/backend/executor/nodeProjectSet.c
-@@ -68,7 +68,11 @@ ExecProjectSet(PlanState *pstate)
+@@ -68,7 +68,7 @@ ExecProjectSet(PlanState *pstate)
  		resultSlot = ExecProjectSRF(node, true);
  
  		if (resultSlot != NULL)
-+#ifdef DEV3
+-			return resultSlot;
 +			return PostExecProcNodeInstr(pstate, resultSlot);
-+#else
- 			return resultSlot;
-+#endif
  	}
  
  	/*
-@@ -94,7 +98,11 @@ ExecProjectSet(PlanState *pstate)
+@@ -94,7 +94,7 @@ ExecProjectSet(PlanState *pstate)
  		outerTupleSlot = ExecProcNode(outerPlan);
  
  		if (TupIsNull(outerTupleSlot))
-+#ifdef DEV3
+-			return NULL;
 +			return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 			return NULL;
-+#endif
  
  		/*
  		 * Prepare to compute projection expressions, which will expect to
-@@ -111,7 +119,11 @@ ExecProjectSet(PlanState *pstate)
+@@ -111,7 +111,7 @@ ExecProjectSet(PlanState *pstate)
  		 * more outerPlan tuples.
  		 */
  		if (resultSlot)
-+#ifdef DEV3
+-			return resultSlot;
 +			return PostExecProcNodeInstr(pstate, resultSlot);
-+#else
- 			return resultSlot;
-+#endif
  
  		/*
  		 * When we do loop back, we'd better reset the econtext again, just in
-@@ -120,7 +132,11 @@ ExecProjectSet(PlanState *pstate)
+@@ -120,7 +120,7 @@ ExecProjectSet(PlanState *pstate)
  		ResetExprContext(econtext);
  	}
  
-+#ifdef DEV3
+-	return NULL;
 +	return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 	return NULL;
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeRecursiveunion.c b/src/backend/executor/nodeRecursiveunion.c
-index 40f66fd0680..d06791f8d61 100644
+index 40f66fd0680..e712e2bea59 100644
 --- a/src/backend/executor/nodeRecursiveunion.c
 +++ b/src/backend/executor/nodeRecursiveunion.c
-@@ -110,7 +110,11 @@ ExecRecursiveUnion(PlanState *pstate)
+@@ -110,7 +110,7 @@ ExecRecursiveUnion(PlanState *pstate)
  			/* Each non-duplicate tuple goes to the working table ... */
  			tuplestore_puttupleslot(node->working_table, slot);
  			/* ... and to the caller */
-+#ifdef DEV3
+-			return slot;
 +			return PostExecProcNodeInstr(pstate, slot);
-+#else
- 			return slot;
-+#endif
  		}
  		node->recursing = true;
  	}
-@@ -166,10 +170,18 @@ ExecRecursiveUnion(PlanState *pstate)
+@@ -166,10 +166,10 @@ ExecRecursiveUnion(PlanState *pstate)
  		node->intermediate_empty = false;
  		tuplestore_puttupleslot(node->intermediate_table, slot);
  		/* ... and return it */
-+#ifdef DEV3
+-		return slot;
 +		return PostExecProcNodeInstr(pstate, slot);
-+#else
- 		return slot;
-+#endif
  	}
  
-+#ifdef DEV3
+-	return NULL;
 +	return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 	return NULL;
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeResult.c b/src/backend/executor/nodeResult.c
-index 06842a48eca..b9e5bd1e0b9 100644
+index 06842a48eca..2d69bbad828 100644
 --- a/src/backend/executor/nodeResult.c
 +++ b/src/backend/executor/nodeResult.c
-@@ -70,6 +70,9 @@ ExecResult(PlanState *pstate)
+@@ -70,6 +70,7 @@ ExecResult(PlanState *pstate)
  	TupleTableSlot *outerTupleSlot;
  	PlanState  *outerPlan;
  	ExprContext *econtext;
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  
  	CHECK_FOR_INTERRUPTS();
  
-@@ -86,7 +89,11 @@ ExecResult(PlanState *pstate)
+@@ -86,7 +87,7 @@ ExecResult(PlanState *pstate)
  		if (!qualResult)
  		{
  			node->rs_done = true;
-+#ifdef DEV3
+-			return NULL;
 +			return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 			return NULL;
-+#endif
  		}
  	}
  
-@@ -114,7 +121,11 @@ ExecResult(PlanState *pstate)
+@@ -114,7 +115,7 @@ ExecResult(PlanState *pstate)
  			outerTupleSlot = ExecProcNode(outerPlan);
  
  			if (TupIsNull(outerTupleSlot))
-+#ifdef DEV3
+-				return NULL;
 +				return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 				return NULL;
-+#endif
  
  			/*
  			 * prepare to compute projection expressions, which will expect to
-@@ -132,10 +143,20 @@ ExecResult(PlanState *pstate)
+@@ -132,10 +133,12 @@ ExecResult(PlanState *pstate)
  		}
  
  		/* form the result tuple using ExecProject(), and return it */
-+#ifdef DEV3
+-		return ExecProject(node->ps.ps_ProjInfo);
 +		result = ExecProject(node->ps.ps_ProjInfo);
 +		return PostExecProcNodeInstr(pstate, result);
-+#else
- 		return ExecProject(node->ps.ps_ProjInfo);
-+#endif
 +
  	}
  
-+#ifdef DEV3
+-	return NULL;
 +	return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 	return NULL;
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeSamplescan.c b/src/backend/executor/nodeSamplescan.c
-index 6b3db7548ed..bea09f10677 100644
+index 6b3db7548ed..6a1b0994dc0 100644
 --- a/src/backend/executor/nodeSamplescan.c
 +++ b/src/backend/executor/nodeSamplescan.c
-@@ -78,11 +78,22 @@ SampleRecheck(SampleScanState *node, TupleTableSlot *slot)
+@@ -78,11 +78,14 @@ SampleRecheck(SampleScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecSampleScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	SampleScanState *node = castNode(SampleScanState, pstate);
  
-+#ifdef DEV3
+-	return ExecScan(&node->ss,
+-					(ExecScanAccessMtd) SampleNext,
+-					(ExecScanRecheckMtd) SampleRecheck);
 +	result = ExecScan(&node->ss,
 +					  (ExecScanAccessMtd) SampleNext,
 +					  (ExecScanRecheckMtd) SampleRecheck);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScan(&node->ss,
- 					(ExecScanAccessMtd) SampleNext,
- 					(ExecScanRecheckMtd) SampleRecheck);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeSeqscan.c b/src/backend/executor/nodeSeqscan.c
-index ed35c58c2c3..5c417cc7e51 100644
+index ed35c58c2c3..0a3bfa335c3 100644
 --- a/src/backend/executor/nodeSeqscan.c
 +++ b/src/backend/executor/nodeSeqscan.c
-@@ -109,18 +109,32 @@ SeqRecheck(SeqScanState *node, TupleTableSlot *slot)
+@@ -109,18 +109,21 @@ SeqRecheck(SeqScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecSeqScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	SeqScanState *node = castNode(SeqScanState, pstate);
  
  	Assert(pstate->state->es_epq_active == NULL);
  	Assert(pstate->qual == NULL);
  	Assert(pstate->ps_ProjInfo == NULL);
  
-+#ifdef DEV3
+-	return ExecScanExtended(&node->ss,
+-							(ExecScanAccessMtd) SeqNext,
+-							(ExecScanRecheckMtd) SeqRecheck,
+-							NULL,
+-							NULL,
+-							NULL);
 +	result = ExecScanExtended(&node->ss,
 +							  (ExecScanAccessMtd) SeqNext,
 +							  (ExecScanRecheckMtd) SeqRecheck,
@@ -2594,31 +2171,26 @@ index ed35c58c2c3..5c417cc7e51 100644
 +							  NULL);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScanExtended(&node->ss,
- 							(ExecScanAccessMtd) SeqNext,
- 							(ExecScanRecheckMtd) SeqRecheck,
- 							NULL,
- 							NULL,
- 							NULL);
-+#endif
  }
  
  /*
-@@ -129,18 +143,32 @@ ExecSeqScan(PlanState *pstate)
+@@ -129,18 +132,21 @@ ExecSeqScan(PlanState *pstate)
  static TupleTableSlot *
  ExecSeqScanWithQual(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	SeqScanState *node = castNode(SeqScanState, pstate);
  
  	Assert(pstate->state->es_epq_active == NULL);
  	Assert(pstate->qual != NULL);
  	Assert(pstate->ps_ProjInfo == NULL);
  
-+#ifdef DEV3
+-	return ExecScanExtended(&node->ss,
+-							(ExecScanAccessMtd) SeqNext,
+-							(ExecScanRecheckMtd) SeqRecheck,
+-							NULL,
+-							pstate->qual,
+-							NULL);
 +	result = ExecScanExtended(&node->ss,
 +							  (ExecScanAccessMtd) SeqNext,
 +							  (ExecScanRecheckMtd) SeqRecheck,
@@ -2627,31 +2199,26 @@ index ed35c58c2c3..5c417cc7e51 100644
 +							  NULL);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScanExtended(&node->ss,
- 							(ExecScanAccessMtd) SeqNext,
- 							(ExecScanRecheckMtd) SeqRecheck,
- 							NULL,
- 							pstate->qual,
- 							NULL);
-+#endif
  }
  
  /*
-@@ -149,18 +177,32 @@ ExecSeqScanWithQual(PlanState *pstate)
+@@ -149,18 +155,21 @@ ExecSeqScanWithQual(PlanState *pstate)
  static TupleTableSlot *
  ExecSeqScanWithProject(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	SeqScanState *node = castNode(SeqScanState, pstate);
  
  	Assert(pstate->state->es_epq_active == NULL);
  	Assert(pstate->qual == NULL);
  	Assert(pstate->ps_ProjInfo != NULL);
  
-+#ifdef DEV3
+-	return ExecScanExtended(&node->ss,
+-							(ExecScanAccessMtd) SeqNext,
+-							(ExecScanRecheckMtd) SeqRecheck,
+-							NULL,
+-							NULL,
+-							pstate->ps_ProjInfo);
 +	result = ExecScanExtended(&node->ss,
 +							  (ExecScanAccessMtd) SeqNext,
 +							  (ExecScanRecheckMtd) SeqRecheck,
@@ -2660,31 +2227,26 @@ index ed35c58c2c3..5c417cc7e51 100644
 +							  pstate->ps_ProjInfo);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScanExtended(&node->ss,
- 							(ExecScanAccessMtd) SeqNext,
- 							(ExecScanRecheckMtd) SeqRecheck,
- 							NULL,
- 							NULL,
- 							pstate->ps_ProjInfo);
-+#endif
  }
  
  /*
-@@ -170,18 +212,32 @@ ExecSeqScanWithProject(PlanState *pstate)
+@@ -170,18 +179,21 @@ ExecSeqScanWithProject(PlanState *pstate)
  static TupleTableSlot *
  ExecSeqScanWithQualProject(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	SeqScanState *node = castNode(SeqScanState, pstate);
  
  	Assert(pstate->state->es_epq_active == NULL);
  	Assert(pstate->qual != NULL);
  	Assert(pstate->ps_ProjInfo != NULL);
  
-+#ifdef DEV3
+-	return ExecScanExtended(&node->ss,
+-							(ExecScanAccessMtd) SeqNext,
+-							(ExecScanRecheckMtd) SeqRecheck,
+-							NULL,
+-							pstate->qual,
+-							pstate->ps_ProjInfo);
 +	result = ExecScanExtended(&node->ss,
 +							  (ExecScanAccessMtd) SeqNext,
 +							  (ExecScanRecheckMtd) SeqRecheck,
@@ -2693,368 +2255,289 @@ index ed35c58c2c3..5c417cc7e51 100644
 +							  pstate->ps_ProjInfo);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScanExtended(&node->ss,
- 							(ExecScanAccessMtd) SeqNext,
- 							(ExecScanRecheckMtd) SeqRecheck,
- 							NULL,
- 							pstate->qual,
- 							pstate->ps_ProjInfo);
-+#endif
  }
  
  /*
-@@ -192,11 +248,22 @@ ExecSeqScanWithQualProject(PlanState *pstate)
+@@ -192,11 +204,14 @@ ExecSeqScanWithQualProject(PlanState *pstate)
  static TupleTableSlot *
  ExecSeqScanEPQ(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	SeqScanState *node = castNode(SeqScanState, pstate);
  
-+#ifdef DEV3
+-	return ExecScan(&node->ss,
+-					(ExecScanAccessMtd) SeqNext,
+-					(ExecScanRecheckMtd) SeqRecheck);
 +	result = ExecScan(&node->ss,
 +					  (ExecScanAccessMtd) SeqNext,
 +					  (ExecScanRecheckMtd) SeqRecheck);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScan(&node->ss,
- 					(ExecScanAccessMtd) SeqNext,
- 					(ExecScanRecheckMtd) SeqRecheck);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeSetOp.c b/src/backend/executor/nodeSetOp.c
-index 4068481a523..62d9ffe821e 100644
+index 4068481a523..a009cfe1a3c 100644
 --- a/src/backend/executor/nodeSetOp.c
 +++ b/src/backend/executor/nodeSetOp.c
-@@ -159,6 +159,9 @@ set_output_count(SetOpState *setopstate, SetOpStatePerGroup pergroup)
+@@ -159,6 +159,7 @@ set_output_count(SetOpState *setopstate, SetOpStatePerGroup pergroup)
  static TupleTableSlot *			/* return: a tuple or NULL */
  ExecSetOp(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	SetOpState *node = castNode(SetOpState, pstate);
  	SetOp	   *plannode = (SetOp *) node->ps.plan;
  	TupleTableSlot *resultTupleSlot = node->ps.ps_ResultTupleSlot;
-@@ -172,22 +175,42 @@ ExecSetOp(PlanState *pstate)
+@@ -172,22 +173,27 @@ ExecSetOp(PlanState *pstate)
  	if (node->numOutput > 0)
  	{
  		node->numOutput--;
-+#ifdef DEV3
+-		return resultTupleSlot;
 +		return PostExecProcNodeInstr(pstate, resultTupleSlot);
-+#else
- 		return resultTupleSlot;
-+#endif
  	}
  
  	/* Otherwise, we're done if we are out of groups */
  	if (node->setop_done)
-+#ifdef DEV3
+-		return NULL;
 +		return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 		return NULL;
-+#endif
  
  	/* Fetch the next tuple group according to the correct strategy */
  	if (plannode->strategy == SETOP_HASHED)
  	{
  		if (!node->table_filled)
  			setop_fill_hash_table(node);
-+#ifdef DEV3
+-		return setop_retrieve_hash_table(node);
++
 +		result = setop_retrieve_hash_table(node);
 +		return PostExecProcNodeInstr(pstate, result);
-+#else
- 		return setop_retrieve_hash_table(node);
-+#endif
  	}
  	else
+-		return setop_retrieve_sorted(node);
 +	{
-+#ifdef DEV3
 +		result = setop_retrieve_sorted(node);
 +		return PostExecProcNodeInstr(pstate, result);
-+#else
- 		return setop_retrieve_sorted(node);
-+#endif
 +	}
  }
  
  /*
 diff --git a/src/backend/executor/nodeSort.c b/src/backend/executor/nodeSort.c
-index f603337ecd3..f94ca703c06 100644
+index f603337ecd3..ad89b11f46f 100644
 --- a/src/backend/executor/nodeSort.c
 +++ b/src/backend/executor/nodeSort.c
-@@ -207,7 +207,11 @@ ExecSort(PlanState *pstate)
+@@ -207,7 +207,7 @@ ExecSort(PlanState *pstate)
  									  ScanDirectionIsForward(dir),
  									  false, slot, NULL);
  
-+#ifdef DEV3
+-	return slot;
 +	return PostExecProcNodeInstr(pstate, slot);
-+#else
- 	return slot;
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeSubqueryscan.c b/src/backend/executor/nodeSubqueryscan.c
-index 8dd1ae46308..7e36c07452f 100644
+index 8dd1ae46308..c7d6a0f9078 100644
 --- a/src/backend/executor/nodeSubqueryscan.c
 +++ b/src/backend/executor/nodeSubqueryscan.c
-@@ -82,11 +82,22 @@ SubqueryRecheck(SubqueryScanState *node, TupleTableSlot *slot)
+@@ -82,11 +82,14 @@ SubqueryRecheck(SubqueryScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecSubqueryScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	SubqueryScanState *node = castNode(SubqueryScanState, pstate);
  
-+#ifdef DEV3
+-	return ExecScan(&node->ss,
+-					(ExecScanAccessMtd) SubqueryNext,
+-					(ExecScanRecheckMtd) SubqueryRecheck);
 +	result = ExecScan(&node->ss,
 +					  (ExecScanAccessMtd) SubqueryNext,
 +					  (ExecScanRecheckMtd) SubqueryRecheck);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScan(&node->ss,
- 					(ExecScanAccessMtd) SubqueryNext,
- 					(ExecScanRecheckMtd) SubqueryRecheck);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeTableFuncscan.c b/src/backend/executor/nodeTableFuncscan.c
-index 83ade3f9437..2c172c50ede 100644
+index 83ade3f9437..21f13f9fa14 100644
 --- a/src/backend/executor/nodeTableFuncscan.c
 +++ b/src/backend/executor/nodeTableFuncscan.c
-@@ -96,11 +96,22 @@ TableFuncRecheck(TableFuncScanState *node, TupleTableSlot *slot)
+@@ -96,11 +96,14 @@ TableFuncRecheck(TableFuncScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecTableFuncScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	TableFuncScanState *node = castNode(TableFuncScanState, pstate);
  
-+#ifdef DEV3
+-	return ExecScan(&node->ss,
+-					(ExecScanAccessMtd) TableFuncNext,
+-					(ExecScanRecheckMtd) TableFuncRecheck);
 +	result = ExecScan(&node->ss,
 +					  (ExecScanAccessMtd) TableFuncNext,
 +					  (ExecScanRecheckMtd) TableFuncRecheck);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScan(&node->ss,
- 					(ExecScanAccessMtd) TableFuncNext,
- 					(ExecScanRecheckMtd) TableFuncRecheck);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeTidrangescan.c b/src/backend/executor/nodeTidrangescan.c
-index 26f7420b64b..8d582b863a6 100644
+index 26f7420b64b..3f21c07a2df 100644
 --- a/src/backend/executor/nodeTidrangescan.c
 +++ b/src/backend/executor/nodeTidrangescan.c
-@@ -295,11 +295,22 @@ TidRangeRecheck(TidRangeScanState *node, TupleTableSlot *slot)
+@@ -295,11 +295,14 @@ TidRangeRecheck(TidRangeScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecTidRangeScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	TidRangeScanState *node = castNode(TidRangeScanState, pstate);
  
-+#ifdef DEV3
+-	return ExecScan(&node->ss,
+-					(ExecScanAccessMtd) TidRangeNext,
+-					(ExecScanRecheckMtd) TidRangeRecheck);
 +	result = ExecScan(&node->ss,
 +					  (ExecScanAccessMtd) TidRangeNext,
 +					  (ExecScanRecheckMtd) TidRangeRecheck);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScan(&node->ss,
- 					(ExecScanAccessMtd) TidRangeNext,
- 					(ExecScanRecheckMtd) TidRangeRecheck);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeTidscan.c b/src/backend/executor/nodeTidscan.c
-index 5e56e29a15f..cfbcf69252d 100644
+index 5e56e29a15f..e2050de4123 100644
 --- a/src/backend/executor/nodeTidscan.c
 +++ b/src/backend/executor/nodeTidscan.c
-@@ -432,11 +432,22 @@ TidRecheck(TidScanState *node, TupleTableSlot *slot)
+@@ -432,11 +432,14 @@ TidRecheck(TidScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecTidScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	TidScanState *node = castNode(TidScanState, pstate);
  
-+#ifdef DEV3
+-	return ExecScan(&node->ss,
+-					(ExecScanAccessMtd) TidNext,
+-					(ExecScanRecheckMtd) TidRecheck);
 +	result = ExecScan(&node->ss,
 +					  (ExecScanAccessMtd) TidNext,
 +					  (ExecScanRecheckMtd) TidRecheck);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScan(&node->ss,
- 					(ExecScanAccessMtd) TidNext,
- 					(ExecScanRecheckMtd) TidRecheck);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeUnique.c b/src/backend/executor/nodeUnique.c
-index 3854ad285c4..e03f61ec494 100644
+index 3854ad285c4..72b01925df2 100644
 --- a/src/backend/executor/nodeUnique.c
 +++ b/src/backend/executor/nodeUnique.c
-@@ -50,6 +50,9 @@ ExecUnique(PlanState *pstate)
+@@ -50,6 +50,7 @@ ExecUnique(PlanState *pstate)
  	TupleTableSlot *resultTupleSlot;
  	TupleTableSlot *slot;
  	PlanState  *outerPlan;
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  
  	CHECK_FOR_INTERRUPTS();
  
-@@ -74,7 +77,11 @@ ExecUnique(PlanState *pstate)
+@@ -74,7 +75,7 @@ ExecUnique(PlanState *pstate)
  		{
  			/* end of subplan, so we're done */
  			ExecClearTuple(resultTupleSlot);
-+#ifdef DEV3
+-			return NULL;
 +			return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 			return NULL;
-+#endif
  		}
  
  		/*
-@@ -100,7 +107,12 @@ ExecUnique(PlanState *pstate)
+@@ -100,7 +101,8 @@ ExecUnique(PlanState *pstate)
  	 * won't guarantee that this source tuple is still accessible after
  	 * fetching the next source tuple.
  	 */
-+#ifdef DEV3
+-	return ExecCopySlot(resultTupleSlot, slot);
 +	result = ExecCopySlot(resultTupleSlot, slot);
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecCopySlot(resultTupleSlot, slot);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeValuesscan.c b/src/backend/executor/nodeValuesscan.c
-index 8e85a5f2e9a..074884d065d 100644
+index 8e85a5f2e9a..950776feab4 100644
 --- a/src/backend/executor/nodeValuesscan.c
 +++ b/src/backend/executor/nodeValuesscan.c
-@@ -195,11 +195,22 @@ ValuesRecheck(ValuesScanState *node, TupleTableSlot *slot)
+@@ -195,11 +195,14 @@ ValuesRecheck(ValuesScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecValuesScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	ValuesScanState *node = castNode(ValuesScanState, pstate);
  
-+#ifdef DEV3
+-	return ExecScan(&node->ss,
+-					(ExecScanAccessMtd) ValuesNext,
+-					(ExecScanRecheckMtd) ValuesRecheck);
 +	result = ExecScan(&node->ss,
 +					  (ExecScanAccessMtd) ValuesNext,
 +					  (ExecScanRecheckMtd) ValuesRecheck);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScan(&node->ss,
- 					(ExecScanAccessMtd) ValuesNext,
- 					(ExecScanRecheckMtd) ValuesRecheck);
-+#endif
  }
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeWindowAgg.c b/src/backend/executor/nodeWindowAgg.c
-index 9a1acce2b5d..1870f054015 100644
+index 9a1acce2b5d..c5ff6714ed5 100644
 --- a/src/backend/executor/nodeWindowAgg.c
 +++ b/src/backend/executor/nodeWindowAgg.c
-@@ -2171,7 +2171,11 @@ ExecWindowAgg(PlanState *pstate)
+@@ -2171,7 +2171,7 @@ ExecWindowAgg(PlanState *pstate)
  	CHECK_FOR_INTERRUPTS();
  
  	if (winstate->status == WINDOWAGG_DONE)
-+#ifdef DEV3
+-		return NULL;
 +		return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 		return NULL;
-+#endif
  
  	/*
  	 * Compute frame offset values, if any, during first call (or after a
-@@ -2224,7 +2228,11 @@ ExecWindowAgg(PlanState *pstate)
+@@ -2224,7 +2224,7 @@ ExecWindowAgg(PlanState *pstate)
  			{
  				/* No further partitions?  We're done */
  				winstate->status = WINDOWAGG_DONE;
-+#ifdef DEV3
+-				return NULL;
 +				return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 				return NULL;
-+#endif
  			}
  		}
  
-@@ -2393,7 +2401,11 @@ ExecWindowAgg(PlanState *pstate)
+@@ -2393,7 +2393,7 @@ ExecWindowAgg(PlanState *pstate)
  					 * Nothing else will match the runcondition.
  					 */
  					winstate->status = WINDOWAGG_DONE;
-+#ifdef DEV3
+-					return NULL;
 +					return PostExecProcNodeInstr(pstate, NULL);
-+#else
- 					return NULL;
-+#endif
  				}
  			}
  
-@@ -2417,7 +2429,11 @@ ExecWindowAgg(PlanState *pstate)
+@@ -2417,7 +2417,7 @@ ExecWindowAgg(PlanState *pstate)
  			break;
  	}
  
-+#ifdef DEV3
+-	return slot;
 +	return PostExecProcNodeInstr(pstate, slot);
-+#else
- 	return slot;
-+#endif
  }
  
  /* -----------------
 diff --git a/src/backend/executor/nodeWorktablescan.c b/src/backend/executor/nodeWorktablescan.c
-index f6379c35d2f..c01016af726 100644
+index f6379c35d2f..1b4afc6d05f 100644
 --- a/src/backend/executor/nodeWorktablescan.c
 +++ b/src/backend/executor/nodeWorktablescan.c
-@@ -80,6 +80,9 @@ WorkTableScanRecheck(WorkTableScanState *node, TupleTableSlot *slot)
+@@ -80,6 +80,7 @@ WorkTableScanRecheck(WorkTableScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecWorkTableScan(PlanState *pstate)
  {
-+#ifdef DEV3
 +	TupleTableSlot *result;
-+#endif
  	WorkTableScanState *node = castNode(WorkTableScanState, pstate);
  
  	/*
-@@ -116,9 +119,17 @@ ExecWorkTableScan(PlanState *pstate)
+@@ -116,9 +117,11 @@ ExecWorkTableScan(PlanState *pstate)
  		ExecAssignScanProjectionInfo(&node->ss);
  	}
  
-+#ifdef DEV3
+-	return ExecScan(&node->ss,
+-					(ExecScanAccessMtd) WorkTableScanNext,
+-					(ExecScanRecheckMtd) WorkTableScanRecheck);
 +	result = ExecScan(&node->ss,
 +					  (ExecScanAccessMtd) WorkTableScanNext,
 +					  (ExecScanRecheckMtd) WorkTableScanRecheck);
 +
 +	return PostExecProcNodeInstr(pstate, result);
-+#else
- 	return ExecScan(&node->ss,
- 					(ExecScanAccessMtd) WorkTableScanNext,
- 					(ExecScanRecheckMtd) WorkTableScanRecheck);
-+#endif
  }
  
  
@@ -3071,7 +2554,7 @@ index 86db3dc8d0d..e1aac4c6d27 100644
  	struct Instrumentation *totaltime;	/* total time spent in ExecutorRun */
  } QueryDesc;
 diff --git a/src/include/executor/executor.h b/src/include/executor/executor.h
-index 104b059544d..8446b8c145d 100644
+index 104b059544d..0b9bc957e5a 100644
 --- a/src/include/executor/executor.h
 +++ b/src/include/executor/executor.h
 @@ -296,7 +296,6 @@ extern void ExecEndNode(PlanState *node);
@@ -3082,7 +2565,7 @@ index 104b059544d..8446b8c145d 100644
  /* ----------------------------------------------------------------
   *		ExecProcNode
   *
-@@ -314,6 +313,43 @@ ExecProcNode(PlanState *node)
+@@ -314,6 +313,39 @@ ExecProcNode(PlanState *node)
  }
  #endif
  
@@ -3094,9 +2577,6 @@ index 104b059544d..8446b8c145d 100644
 + *
 + * ----------------------------------------------------------------
 + */
-+#define DEV3
-+
-+#ifdef DEV3
 +#ifndef FRONTEND
 +static pg_attribute_always_inline TupleTableSlot *
 +PostExecProcNodeInstr(PlanState *node, TupleTableSlot *result)
@@ -3119,7 +2599,6 @@ index 104b059544d..8446b8c145d 100644
 +
 +	return result;
 +}
-+#endif
 +#endif
 +
 +
@@ -3271,7 +2750,7 @@ index 03653ab6c6c..d6e18401fc1 100644
 +
  #endif							/* INSTRUMENT_H */
 diff --git a/src/include/nodes/execnodes.h b/src/include/nodes/execnodes.h
-index e107d6e5f81..9f34d5fcea5 100644
+index e107d6e5f81..a4a0a6ca6d4 100644
 --- a/src/include/nodes/execnodes.h
 +++ b/src/include/nodes/execnodes.h
 @@ -522,6 +522,7 @@ typedef struct ResultRelInfo
