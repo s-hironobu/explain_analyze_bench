@@ -2557,7 +2557,7 @@ index 104b059544d..36f8b78cd14 100644
 +
 +	if (!TupIsNull(result))
 +		/* Prevent overflow */
-+		if ((current & TUPLECOUNT_MASK) != TUPLECOUNT_MASK)
++		if ((current & TUPLECOUNT_MASK) != MAX_TUPLECOUNT)
 +			/* tuplecount++ */
 +			current += 1;
 +
