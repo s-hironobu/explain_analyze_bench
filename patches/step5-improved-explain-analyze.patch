@@ -2720,7 +2720,7 @@ index 03653ab6c6c..d6e18401fc1 100644
 +
  #endif							/* INSTRUMENT_H */
 diff --git a/src/include/nodes/execnodes.h b/src/include/nodes/execnodes.h
-index e107d6e5f81..a4a0a6ca6d4 100644
+index e107d6e5f81..3a889d3f47f 100644
 --- a/src/include/nodes/execnodes.h
 +++ b/src/include/nodes/execnodes.h
 @@ -522,6 +522,7 @@ typedef struct ResultRelInfo
@@ -2741,7 +2741,7 @@ index e107d6e5f81..a4a0a6ca6d4 100644
  	WorkerInstrumentation *worker_instrument;	/* per-worker instrumentation */
  
  	/* Per-worker JIT instrumentation */
-@@ -2930,4 +2933,220 @@ typedef struct LimitState
+@@ -2930,4 +2933,225 @@ typedef struct LimitState
  	TupleTableSlot *last_slot;	/* slot for evaluation of ties */
  } LimitState;
  
@@ -2760,6 +2760,7 @@ index e107d6e5f81..a4a0a6ca6d4 100644
 +#define FAST_PATH_INSTR_MASK  (1ULL << FAST_PATH_INSTR_BIT)
 +#define RUNNING_MASK   (1ULL << RUNNING_BIT)
 +#define TUPLECOUNT_MASK ((1ULL << RUNNING_BIT) - 1)  //(0..61)
++#define MAX_TUPLECOUNT        TUPLECOUNT_MASK
 +
 +// fast_path_instr
 +#define is_fast_path_instr_true(node)    (((node)->hot_instr & FAST_PATH_INSTR_MASK) != 0)
@@ -2777,9 +2778,13 @@ index e107d6e5f81..a4a0a6ca6d4 100644
 +#define get_tuplecount(node)     ((node)->hot_instr & TUPLECOUNT_MASK)
 +#define set_tuplecount(node, n)  \
 +	((node)->hot_instr = ((node)->hot_instr & ~TUPLECOUNT_MASK) | ((n) & TUPLECOUNT_MASK))
-+#define add_tuplecount(node, n)  \
-+	((node)->hot_instr = ((node)->hot_instr & ~TUPLECOUNT_MASK) |		\
-+	 (((node)->hot_instr + (n)) & TUPLECOUNT_MASK))
++#define add_tuplecount(instr, n) do { \
++		uint64_t current_tuple = (instr)->hot_instr & TUPLECOUNT_MASK;  \
++		uint64_t new_tuple = current_tuple + (n);                       \
++		if (new_tuple <= MAX_TUPLECOUNT) {                              \
++			(instr)->hot_instr = ((instr)->hot_instr & ~TUPLECOUNT_MASK) | new_tuple; \
++}                                                               \
++} while(0)
 +
 +
 +/* Exit from a plan node */
