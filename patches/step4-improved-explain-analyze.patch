@@ -260,22 +260,6 @@ index 5d3cabe73e3..2e7e2e8874e 100644
  }
  
  /*
-diff --git a/src/backend/executor/execMain.c b/src/backend/executor/execMain.c
-index 0391798dd2c..740a0b64758 100644
---- a/src/backend/executor/execMain.c
-+++ b/src/backend/executor/execMain.c
-@@ -246,7 +246,11 @@ standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
- 	estate->es_snapshot = RegisterSnapshot(queryDesc->snapshot);
- 	estate->es_crosscheck_snapshot = RegisterSnapshot(queryDesc->crosscheck_snapshot);
- 	estate->es_top_eflags = eflags;
-+#ifdef ALWAYS_INSTR
-+	estate->es_instrument = true;
-+#else
- 	estate->es_instrument = queryDesc->instrument_options;
-+#endif
- 	estate->es_jit_flags = queryDesc->plannedstmt->jitFlags;
- 
- 	/*
 diff --git a/src/backend/executor/execProcnode.c b/src/backend/executor/execProcnode.c
 index f5f9cfbeead..122023e2666 100644
 --- a/src/backend/executor/execProcnode.c
@@ -345,39 +329,13 @@ index f5f9cfbeead..122023e2666 100644
  
  	return false;
 diff --git a/src/backend/executor/instrument.c b/src/backend/executor/instrument.c
-index 56e635f4700..c9403db1839 100644
+index 56e635f4700..2628fa2d4fa 100644
 --- a/src/backend/executor/instrument.c
 +++ b/src/backend/executor/instrument.c
-@@ -36,9 +36,15 @@ InstrAlloc(int n, int instrument_options, bool async_mode)
- 	instr = palloc0(n * sizeof(Instrumentation));
- 	if (instrument_options & (INSTRUMENT_BUFFERS | INSTRUMENT_TIMER | INSTRUMENT_WAL))
- 	{
-+#ifdef ALWAYS_INSTR
-+		bool		need_buffers = false;
-+		bool		need_wal = false;
-+		bool		need_timer = false;
-+#else
- 		bool		need_buffers = (instrument_options & INSTRUMENT_BUFFERS) != 0;
- 		bool		need_wal = (instrument_options & INSTRUMENT_WAL) != 0;
- 		bool		need_timer = (instrument_options & INSTRUMENT_TIMER) != 0;
-+#endif
- 		int			i;
- 
- 		for (i = 0; i < n; i++)
-@@ -58,127 +64,32 @@ void
- InstrInit(Instrumentation *instr, int instrument_options)
- {
- 	memset(instr, 0, sizeof(Instrumentation));
-+#ifdef ALWAYS_INSTR
-+	instr->need_bufusage = false;
-+	instr->need_walusage = false;
-+	instr->need_timer = false;
-+#else
- 	instr->need_bufusage = (instrument_options & INSTRUMENT_BUFFERS) != 0;
- 	instr->need_walusage = (instrument_options & INSTRUMENT_WAL) != 0;
+@@ -63,122 +63,21 @@ InstrInit(Instrumentation *instr, int instrument_options)
  	instr->need_timer = (instrument_options & INSTRUMENT_TIMER) != 0;
--}
--
+ }
+ 
 -/* Entry to a plan node */
 -void
 -InstrStartNode(Instrumentation *instr)
@@ -477,9 +435,8 @@ index 56e635f4700..c9403db1839 100644
 -	INSTR_TIME_SET_ZERO(instr->counter);
 -	instr->firsttuple = 0;
 -	instr->tuplecount = 0;
-+#endif
- }
- 
+-}
+-
  /* aggregate instrumentation information */
  void
  InstrAggNode(Instrumentation *dst, Instrumentation *add)
@@ -2176,7 +2133,7 @@ index f6379c35d2f..1b4afc6d05f 100644
  
  
 diff --git a/src/include/executor/executor.h b/src/include/executor/executor.h
-index 104b059544d..c469b2fb7ab 100644
+index 104b059544d..f28ca05e7a4 100644
 --- a/src/include/executor/executor.h
 +++ b/src/include/executor/executor.h
 @@ -296,7 +296,6 @@ extern void ExecEndNode(PlanState *node);
@@ -2187,7 +2144,7 @@ index 104b059544d..c469b2fb7ab 100644
  /* ----------------------------------------------------------------
   *		ExecProcNode
   *
-@@ -314,6 +313,45 @@ ExecProcNode(PlanState *node)
+@@ -314,6 +313,46 @@ ExecProcNode(PlanState *node)
  }
  #endif
  
@@ -2215,9 +2172,10 @@ index 104b059544d..c469b2fb7ab 100644
 +	current = instr->hot_instr;
 +
 +	if (!TupIsNull(result))
-+		/* TODO: Prevent overflow */
-+		/* Increment tuplecount++ */
-+		current = ((current + 1) & TUPLECOUNT_MASK) | (current & (FAST_PATH_INSTR_MASK | RUNNING_MASK));
++		/* Prevent overflow */
++		if ((current & TUPLECOUNT_MASK) != TUPLECOUNT_MASK)
++			/* tuplecount++ */
++			current += 1;
 +
 +	/* running = true */
 +	current |= RUNNING_MASK;

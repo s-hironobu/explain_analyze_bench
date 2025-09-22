@@ -428,22 +428,10 @@ index 5d3cabe73e3..1912e130275 100644
  
  /*
 diff --git a/src/backend/executor/execMain.c b/src/backend/executor/execMain.c
-index 0391798dd2c..05a3d22e231 100644
+index 0391798dd2c..0b61bce6c75 100644
 --- a/src/backend/executor/execMain.c
 +++ b/src/backend/executor/execMain.c
-@@ -246,7 +246,11 @@ standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
- 	estate->es_snapshot = RegisterSnapshot(queryDesc->snapshot);
- 	estate->es_crosscheck_snapshot = RegisterSnapshot(queryDesc->crosscheck_snapshot);
- 	estate->es_top_eflags = eflags;
-+#ifdef ALWAYS_INSTR
-+	estate->es_instrument = true;
-+#else
- 	estate->es_instrument = queryDesc->instrument_options;
-+#endif
- 	estate->es_jit_flags = queryDesc->plannedstmt->jitFlags;
- 
- 	/*
-@@ -384,7 +388,7 @@ standard_ExecutorRun(QueryDesc *queryDesc,
+@@ -384,7 +384,7 @@ standard_ExecutorRun(QueryDesc *queryDesc,
  		dest->rShutdown(dest);
  
  	if (queryDesc->totaltime)
@@ -452,7 +440,7 @@ index 0391798dd2c..05a3d22e231 100644
  
  	MemoryContextSwitchTo(oldcontext);
  }
-@@ -444,7 +448,7 @@ standard_ExecutorFinish(QueryDesc *queryDesc)
+@@ -444,7 +444,7 @@ standard_ExecutorFinish(QueryDesc *queryDesc)
  		AfterTriggerEndQuery(estate);
  
  	if (queryDesc->totaltime)
@@ -571,10 +559,18 @@ index f098a5557cf..c7af573a646 100644
  
  	return planstate_tree_walker(planstate, ExecParallelReportInstrumentation,
 diff --git a/src/backend/executor/execProcnode.c b/src/backend/executor/execProcnode.c
-index f5f9cfbeead..bdb43e7919a 100644
+index f5f9cfbeead..ff370a4ae2f 100644
 --- a/src/backend/executor/execProcnode.c
 +++ b/src/backend/executor/execProcnode.c
-@@ -461,8 +461,29 @@ ExecProcNodeFirst(PlanState *node)
+@@ -123,7 +123,6 @@ static TupleTableSlot *ExecProcNodeFirst(PlanState *node);
+ static TupleTableSlot *ExecProcNodeInstr(PlanState *node);
+ static bool ExecShutdownNode_walker(PlanState *node, void *context);
+ 
+-
+ /* ------------------------------------------------------------------------
+  *		ExecInitNode
+  *
+@@ -461,8 +460,29 @@ ExecProcNodeFirst(PlanState *node)
  	 * does instrumentation.  Otherwise we can dispense with all wrappers and
  	 * have ExecProcNode() directly call the relevant function from now on.
  	 */
@@ -605,7 +601,7 @@ index f5f9cfbeead..bdb43e7919a 100644
  	else
  		node->ExecProcNode = node->ExecProcNodeReal;
  
-@@ -484,7 +505,7 @@ ExecProcNodeInstr(PlanState *node)
+@@ -484,7 +504,7 @@ ExecProcNodeInstr(PlanState *node)
  
  	result = node->ExecProcNodeReal(node);
  
@@ -614,7 +610,7 @@ index f5f9cfbeead..bdb43e7919a 100644
  
  	return result;
  }
-@@ -792,7 +813,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
+@@ -792,7 +812,7 @@ ExecShutdownNode_walker(PlanState *node, void *context)
  	 * has never been executed, so as to avoid incorrectly making it appear
  	 * that it has.
  	 */
@@ -623,7 +619,7 @@ index f5f9cfbeead..bdb43e7919a 100644
  		InstrStartNode(node->instrument);
  
  	planstate_tree_walker(node, ExecShutdownNode_walker, context);
-@@ -822,8 +843,8 @@ ExecShutdownNode_walker(PlanState *node, void *context)
+@@ -822,8 +842,8 @@ ExecShutdownNode_walker(PlanState *node, void *context)
  	}
  
  	/* Stop the node if we started it above, reporting 0 tuples. */
@@ -635,7 +631,7 @@ index f5f9cfbeead..bdb43e7919a 100644
  	return false;
  }
 diff --git a/src/backend/executor/instrument.c b/src/backend/executor/instrument.c
-index 56e635f4700..52a13111747 100644
+index 56e635f4700..7cbaf5e4817 100644
 --- a/src/backend/executor/instrument.c
 +++ b/src/backend/executor/instrument.c
 @@ -22,8 +22,8 @@ static BufferUsage save_pgBufferUsage;
@@ -649,35 +645,8 @@ index 56e635f4700..52a13111747 100644
  
  
  /* Allocate new instrumentation structure(s) */
-@@ -36,9 +36,15 @@ InstrAlloc(int n, int instrument_options, bool async_mode)
- 	instr = palloc0(n * sizeof(Instrumentation));
- 	if (instrument_options & (INSTRUMENT_BUFFERS | INSTRUMENT_TIMER | INSTRUMENT_WAL))
- 	{
-+#ifdef ALWAYS_INSTR
-+		bool		need_buffers = false;
-+		bool		need_wal = false;
-+		bool		need_timer = false;
-+#else
- 		bool		need_buffers = (instrument_options & INSTRUMENT_BUFFERS) != 0;
- 		bool		need_wal = (instrument_options & INSTRUMENT_WAL) != 0;
- 		bool		need_timer = (instrument_options & INSTRUMENT_TIMER) != 0;
-+#endif
- 		int			i;
- 
- 		for (i = 0; i < n; i++)
-@@ -58,142 +64,17 @@ void
- InstrInit(Instrumentation *instr, int instrument_options)
- {
- 	memset(instr, 0, sizeof(Instrumentation));
-+#ifdef ALWAYS_INSTR
-+	instr->need_bufusage = false;
-+	instr->need_walusage = false;
-+	instr->need_timer = false;
-+#else
- 	instr->need_bufusage = (instrument_options & INSTRUMENT_BUFFERS) != 0;
- 	instr->need_walusage = (instrument_options & INSTRUMENT_WAL) != 0;
+@@ -63,137 +63,6 @@ InstrInit(Instrumentation *instr, int instrument_options)
  	instr->need_timer = (instrument_options & INSTRUMENT_TIMER) != 0;
-+#endif
  }
  
 -/* Entry to a plan node */
@@ -814,7 +783,7 @@ index 56e635f4700..52a13111747 100644
  
  /* note current values during parallel executor startup */
  void
-@@ -222,7 +103,7 @@ InstrAccumParallelQuery(BufferUsage *bufusage, WalUsage *walusage)
+@@ -222,7 +91,7 @@ InstrAccumParallelQuery(BufferUsage *bufusage, WalUsage *walusage)
  }
  
  /* dst += add */
@@ -823,7 +792,7 @@ index 56e635f4700..52a13111747 100644
  BufferUsageAdd(BufferUsage *dst, const BufferUsage *add)
  {
  	dst->shared_blks_hit += add->shared_blks_hit;
-@@ -274,7 +155,7 @@ BufferUsageAccumDiff(BufferUsage *dst,
+@@ -274,7 +143,7 @@ BufferUsageAccumDiff(BufferUsage *dst,
  }
  
  /* helper functions for WAL usage accumulation */
@@ -2554,7 +2523,7 @@ index 86db3dc8d0d..e1aac4c6d27 100644
  	struct Instrumentation *totaltime;	/* total time spent in ExecutorRun */
  } QueryDesc;
 diff --git a/src/include/executor/executor.h b/src/include/executor/executor.h
-index 104b059544d..0b9bc957e5a 100644
+index 104b059544d..36f8b78cd14 100644
 --- a/src/include/executor/executor.h
 +++ b/src/include/executor/executor.h
 @@ -296,7 +296,6 @@ extern void ExecEndNode(PlanState *node);
@@ -2565,7 +2534,7 @@ index 104b059544d..0b9bc957e5a 100644
  /* ----------------------------------------------------------------
   *		ExecProcNode
   *
-@@ -314,6 +313,39 @@ ExecProcNode(PlanState *node)
+@@ -314,6 +313,40 @@ ExecProcNode(PlanState *node)
  }
  #endif
  
@@ -2587,9 +2556,10 @@ index 104b059544d..0b9bc957e5a 100644
 +		return result;
 +
 +	if (!TupIsNull(result))
-+		/* TODO: Prevent overflow */
-+		/* tuplecount++ */
-+		current = ((current + 1) & TUPLECOUNT_MASK) | (current & (FAST_PATH_INSTR_MASK | RUNNING_MASK));
++		/* Prevent overflow */
++		if ((current & TUPLECOUNT_MASK) != TUPLECOUNT_MASK)
++			/* tuplecount++ */
++			current += 1;
 +
 +	/* running = true */
 +	current |= RUNNING_MASK;
