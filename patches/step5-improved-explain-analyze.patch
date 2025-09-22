@@ -2778,11 +2778,11 @@ index e107d6e5f81..3a889d3f47f 100644
 +#define get_tuplecount(node)     ((node)->hot_instr & TUPLECOUNT_MASK)
 +#define set_tuplecount(node, n)  \
 +	((node)->hot_instr = ((node)->hot_instr & ~TUPLECOUNT_MASK) | ((n) & TUPLECOUNT_MASK))
-+#define add_tuplecount(instr, n) do { \
-+		uint64_t current_tuple = (instr)->hot_instr & TUPLECOUNT_MASK;  \
++#define add_tuplecount(node, n) do { \
++		uint64_t current_tuple = (node)->hot_instr & TUPLECOUNT_MASK;  \
 +		uint64_t new_tuple = current_tuple + (n);                       \
 +		if (new_tuple <= MAX_TUPLECOUNT) {                              \
-+			(instr)->hot_instr = ((instr)->hot_instr & ~TUPLECOUNT_MASK) | new_tuple; \
++			(node)->hot_instr = ((node)->hot_instr & ~TUPLECOUNT_MASK) | new_tuple; \
 +}                                                               \
 +} while(0)
 +
