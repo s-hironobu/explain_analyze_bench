@@ -165,70 +165,51 @@ bench() {
     ./bin/pg_ctl -D data stop
 }
 
-step0_bench() {
+run_benchmark_step() {
+    local step_name=$1
+    local patch_file=$2
+    local batch_file=$3
+
     make_clean
+    git_reset
     cd $SOURCE_DIR
+
+    if [ -n "$patch_file" ]; then
+        patch -p1 < "../patches/$patch_file"
+    fi
+
     ./configure --prefix=$PGSQL_DIR --without-icu CFLAGS="-O3 -g"
     make -j4 && make install
     cd $PGSQL_DIR
-    bench "STEP0" "batch-with-time.sql" "step0.log"
+    bench "$step_name" "$batch_file" "${step_name,,}.log"
+}
+
+
+step0_bench() {
+    run_benchmark_step "STEP0" "" "batch-with-time.sql"
 }
 
 step1_bench() {
-    make_clean
-    git_reset
-    cd $SOURCE_DIR
-    patch -p1 < ../patches/step1-improved-explain-analyze.patch
-    ./configure --prefix=$PGSQL_DIR --without-icu CFLAGS="-O3 -g"
-    make -j4 && make install
-    cd $PGSQL_DIR
-    bench "STEP1" "batch.sql" "step1.log"
+    run_benchmark_step "STEP1" "step1-improved-explain-analyze.patch" "batch.sql"
 }
 
 step2_bench() {
-    make_clean
-    git_reset
-    cd $SOURCE_DIR
-    patch -p1 < ../patches/step2-improved-explain-analyze.patch
-    ./configure --prefix=$PGSQL_DIR --without-icu CFLAGS="-O3 -g"
-    make -j4 && make install
-    cd $PGSQL_DIR
-    bench "STEP2" "batch.sql" "step2.log"
+    run_benchmark_step "STEP2" "step2-improved-explain-analyze.patch" "batch.sql"
 }
 
 step3_bench() {
-    make_clean
-    git_reset
-    cd $SOURCE_DIR
-    patch -p1 < ../patches/step3-improved-explain-analyze.patch
-    ./configure --prefix=$PGSQL_DIR --without-icu CFLAGS="-O3 -g"
-    make -j4 && make install
-    cd $PGSQL_DIR
-    bench "STEP3" "batch.sql" "step3.log"
+    run_benchmark_step "STEP3" "step3-improved-explain-analyze.patch" "batch.sql"
 }
 
 
 step4_bench() {
-    make_clean
-    git_reset
-    cd $SOURCE_DIR
-    patch -p1 < ../patches/step4-improved-explain-analyze.patch
-    ./configure --prefix=$PGSQL_DIR --without-icu CFLAGS="-O3 -g"
-    make -j4 && make install
-    cd $PGSQL_DIR
-    bench "STEP4" "batch.sql" "step4.log"
+    run_benchmark_step "STEP4" "step4-improved-explain-analyze.patch" "batch.sql"
 }
 
 step5_bench() {
-    make_clean
-    git_reset
-    cd $SOURCE_DIR
-    patch -p1 < ../patches/step5-improved-explain-analyze.patch
-    ./configure --prefix=$PGSQL_DIR --without-icu CFLAGS="-O3 -g"
-    make -j4 && make install
-    cd $PGSQL_DIR
-    bench "STEP5" "batch.sql" "step5.log"
+    run_benchmark_step "STEP5" "step5-improved-explain-analyze.patch" "batch.sql"
 }
+
 
 benchmark() {
     #
@@ -238,8 +219,6 @@ benchmark() {
 	echo "Error: PostgreSQL repository not found."
 	exit 1
     fi
-
-    git_reset
 
     #
     # 2. check data_dir
@@ -279,11 +258,17 @@ benchmark() {
             ;;
 	ALL)
 	    echo "ALL"
+	    echo "STEP0"
 	    step0_bench
+	    echo "STEP1"
 	    step1_bench
+	    echo "STEP2"
 	    step2_bench
+	    echo "STEP3"
 	    step3_bench
+	    echo "STEP4"
 	    step4_bench
+	    echo "STEP5"
 	    step5_bench
 	    ;;
 	*)
