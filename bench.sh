@@ -181,7 +181,7 @@ run_benchmark_step() {
     ./configure --prefix=$PGSQL_DIR --without-icu CFLAGS="-O3 -g"
     make -j4 && make install
     cd $PGSQL_DIR
-    bench "$step_name" "$batch_file" "${step_name,,}.log"
+    bench "$step_name" "$batch_file" "${step_name}.log"
 }
 
 
