@@ -15,8 +15,8 @@ SOURCE_DIR=${BASE}/postgres
 PGSQL_DIR=${BASE}/pgsql
 DB_NAME="testdb"
 
-COMMIT="6a46089e458f2d700dd3b8c3f6fc782de933529a"
-
+#COMMIT="6a46089e458f2d700dd3b8c3f6fc782de933529a"
+COMMIT="aa749bde323364039f369784071f315ad53c1325"
 
 #--------------------
 # Common

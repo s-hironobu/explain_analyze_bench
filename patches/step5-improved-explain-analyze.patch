@@ -1,8 +1,8 @@
 diff --git a/src/backend/commands/explain.c b/src/backend/commands/explain.c
-index 8345bc0264b..caae15f8a67 100644
+index 7e699f8595e..e5d7087a9eb 100644
 --- a/src/backend/commands/explain.c
 +++ b/src/backend/commands/explain.c
-@@ -1103,7 +1103,7 @@ report_triggers(ResultRelInfo *rInfo, bool show_relname, ExplainState *es)
+@@ -1104,7 +1104,7 @@ report_triggers(ResultRelInfo *rInfo, bool show_relname, ExplainState *es)
  		char	   *conname = NULL;
  
  		/* Must clean up instrumentation state */
@@ -11,7 +11,7 @@ index 8345bc0264b..caae15f8a67 100644
  
  		/*
  		 * We ignore triggers that were never invoked; they likely aren't
-@@ -1134,10 +1134,10 @@ report_triggers(ResultRelInfo *rInfo, bool show_relname, ExplainState *es)
+@@ -1135,10 +1135,10 @@ report_triggers(ResultRelInfo *rInfo, bool show_relname, ExplainState *es)
  			if (show_relname)
  				appendStringInfo(es->str, " on %s", relname);
  			if (es->timing)
@@ -24,7 +24,7 @@ index 8345bc0264b..caae15f8a67 100644
  		}
  		else
  		{
-@@ -1148,7 +1148,7 @@ report_triggers(ResultRelInfo *rInfo, bool show_relname, ExplainState *es)
+@@ -1149,7 +1149,7 @@ report_triggers(ResultRelInfo *rInfo, bool show_relname, ExplainState *es)
  			if (es->timing)
  				ExplainPropertyFloat("Time", "ms", 1000.0 * instr->total, 3,
  									 es);
@@ -33,7 +33,7 @@ index 8345bc0264b..caae15f8a67 100644
  		}
  
  		if (conname)
-@@ -1824,15 +1824,21 @@ ExplainNode(PlanState *planstate, List *ancestors,
+@@ -1829,15 +1829,21 @@ ExplainNode(PlanState *planstate, List *ancestors,
  	 * auto_explain has to contend with.
  	 */
  	if (planstate->instrument)
@@ -49,7 +49,7 @@ index 8345bc0264b..caae15f8a67 100644
 -		double		rows = planstate->instrument->ntuples / nloops;
 +		double		startup_ms;
 +		double		total_ms;
-+		uint64_t 	nloops = planstate->instrument->nloops;
++		uint64_t	nloops = planstate->instrument->nloops;
 +		double		rows = planstate->instrument->ntuples / (double) nloops;
 +
 +		if (es->timing)
@@ -60,7 +60,7 @@ index 8345bc0264b..caae15f8a67 100644
  
  		if (es->format == EXPLAIN_FORMAT_TEXT)
  		{
-@@ -1841,7 +1847,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
+@@ -1846,7 +1852,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
  			if (es->timing)
  				appendStringInfo(es->str, "time=%.3f..%.3f ", startup_ms, total_ms);
  
@@ -69,7 +69,7 @@ index 8345bc0264b..caae15f8a67 100644
  		}
  		else
  		{
-@@ -1853,7 +1859,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
+@@ -1858,7 +1864,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
  									 3, es);
  			}
  			ExplainPropertyFloat("Actual Rows", NULL, rows, 2, es);
@@ -78,7 +78,7 @@ index 8345bc0264b..caae15f8a67 100644
  		}
  	}
  	else if (es->analyze)
-@@ -1868,7 +1874,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
+@@ -1873,7 +1879,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
  				ExplainPropertyFloat("Actual Total Time", "ms", 0.0, 3, es);
  			}
  			ExplainPropertyFloat("Actual Rows", NULL, 0.0, 0, es);
@@ -87,12 +87,12 @@ index 8345bc0264b..caae15f8a67 100644
  		}
  	}
  
-@@ -1889,16 +1895,20 @@ ExplainNode(PlanState *planstate, List *ancestors,
+@@ -1894,16 +1900,20 @@ ExplainNode(PlanState *planstate, List *ancestors,
  		for (int n = 0; n < w->num_workers; n++)
  		{
  			Instrumentation *instrument = &w->instrument[n];
 -			double		nloops = instrument->nloops;
-+			uint64_t 	nloops = instrument->nloops;
++			uint64_t	nloops = instrument->nloops;
  			double		startup_ms;
  			double		total_ms;
  			double		rows;
@@ -112,7 +112,7 @@ index 8345bc0264b..caae15f8a67 100644
  
  			ExplainOpenWorker(n, es);
  
-@@ -1909,7 +1919,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
+@@ -1914,7 +1924,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
  				if (es->timing)
  					appendStringInfo(es->str, "time=%.3f..%.3f ", startup_ms, total_ms);
  
@@ -121,7 +121,7 @@ index 8345bc0264b..caae15f8a67 100644
  			}
  			else
  			{
-@@ -1922,7 +1932,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
+@@ -1927,7 +1937,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
  				}
  
  				ExplainPropertyFloat("Actual Rows", NULL, rows, 2, es);
@@ -130,7 +130,7 @@ index 8345bc0264b..caae15f8a67 100644
  			}
  
  			ExplainCloseWorker(n, es);
-@@ -1980,8 +1990,8 @@ ExplainNode(PlanState *planstate, List *ancestors,
+@@ -1985,8 +1995,8 @@ ExplainNode(PlanState *planstate, List *ancestors,
  				show_instrumentation_count("Rows Removed by Filter", 1,
  										   planstate, es);
  			if (es->analyze)
@@ -141,25 +141,25 @@ index 8345bc0264b..caae15f8a67 100644
  			show_indexsearches_info(planstate, es);
  			break;
  		case T_BitmapIndexScan:
-@@ -2295,7 +2305,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
+@@ -2301,7 +2311,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
  		for (int n = 0; n < w->num_workers; n++)
  		{
  			Instrumentation *instrument = &w->instrument[n];
 -			double		nloops = instrument->nloops;
-+			uint64_t 	nloops = instrument->nloops;
++			uint64_t	nloops = instrument->nloops;
  
  			if (nloops <= 0)
  				continue;
-@@ -3985,7 +3995,7 @@ show_instrumentation_count(const char *qlabel, int which,
+@@ -3991,7 +4001,7 @@ show_instrumentation_count(const char *qlabel, int which,
  						   PlanState *planstate, ExplainState *es)
  {
  	double		nfiltered;
 -	double		nloops;
-+	uint64_t 	nloops;
++	uint64_t	nloops;
  
  	if (!es->analyze || !planstate->instrument)
  		return;
-@@ -4000,7 +4010,7 @@ show_instrumentation_count(const char *qlabel, int which,
+@@ -4006,7 +4016,7 @@ show_instrumentation_count(const char *qlabel, int which,
  	if (nfiltered > 0 || es->format != EXPLAIN_FORMAT_TEXT)
  	{
  		if (nloops > 0)
@@ -168,16 +168,16 @@ index 8345bc0264b..caae15f8a67 100644
  		else
  			ExplainPropertyFloat(qlabel, NULL, 0.0, 0, es);
  	}
-@@ -4681,21 +4691,21 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
+@@ -4693,21 +4703,21 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
  		/* EXPLAIN ANALYZE display of actual outcome for each tuple proposed */
  		if (es->analyze && mtstate->ps.instrument)
  		{
 -			double		total;
 -			double		insert_path;
 -			double		other_path;
-+			uint64_t 	total;
-+			uint64_t 	insert_path;
-+			uint64_t 	other_path;
++			uint64_t	total;
++			uint64_t	insert_path;
++			uint64_t	other_path;
  
 -			InstrEndLoop(outerPlanState(mtstate)->instrument);
 +			InstrEndLoop(outerPlanState(mtstate));
@@ -198,7 +198,7 @@ index 8345bc0264b..caae15f8a67 100644
  		}
  	}
  	else if (node->operation == CMD_MERGE)
-@@ -4703,13 +4713,13 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
+@@ -4715,13 +4725,13 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
  		/* EXPLAIN ANALYZE display of tuples processed */
  		if (es->analyze && mtstate->ps.instrument)
  		{
@@ -207,18 +207,18 @@ index 8345bc0264b..caae15f8a67 100644
 -			double		update_path;
 -			double		delete_path;
 -			double		skipped_path;
-+			uint64_t 	total;
-+			uint64_t 	insert_path;
-+			uint64_t 	update_path;
-+			uint64_t 	delete_path;
-+			uint64_t 	skipped_path;
++			uint64_t	total;
++			uint64_t	insert_path;
++			uint64_t	update_path;
++			uint64_t	delete_path;
++			uint64_t	skipped_path;
  
 -			InstrEndLoop(outerPlanState(mtstate)->instrument);
 +			InstrEndLoop(outerPlanState(mtstate));
  
  			/* count the number of source rows */
  			total = outerPlanState(mtstate)->instrument->ntuples;
-@@ -4726,22 +4736,22 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
+@@ -4738,22 +4748,22 @@ show_modifytable_info(ModifyTableState *mtstate, List *ancestors,
  					ExplainIndentText(es);
  					appendStringInfoString(es->str, "Tuples:");
  					if (insert_path > 0)
@@ -250,10 +250,10 @@ index 8345bc0264b..caae15f8a67 100644
  		}
  	}
 diff --git a/src/backend/commands/trigger.c b/src/backend/commands/trigger.c
-index 7dc121f73f1..08168633060 100644
+index 579ac8d76ae..8f878166b6c 100644
 --- a/src/backend/commands/trigger.c
 +++ b/src/backend/commands/trigger.c
-@@ -89,6 +89,7 @@ static bool TriggerEnabled(EState *estate, ResultRelInfo *relinfo,
+@@ -88,6 +88,7 @@ static bool TriggerEnabled(EState *estate, ResultRelInfo *relinfo,
  						   Bitmapset *modifiedCols,
  						   TupleTableSlot *oldslot, TupleTableSlot *newslot);
  static HeapTuple ExecCallTriggerFunc(TriggerData *trigdata,
@@ -261,7 +261,7 @@ index 7dc121f73f1..08168633060 100644
  									 int tgindx,
  									 FmgrInfo *finfo,
  									 Instrumentation *instr,
-@@ -2306,6 +2307,7 @@ FindTriggerIncompatibleWithInheritance(TriggerDesc *trigdesc)
+@@ -2307,6 +2308,7 @@ FindTriggerIncompatibleWithInheritance(TriggerDesc *trigdesc)
   */
  static HeapTuple
  ExecCallTriggerFunc(TriggerData *trigdata,
@@ -269,7 +269,7 @@ index 7dc121f73f1..08168633060 100644
  					int tgindx,
  					FmgrInfo *finfo,
  					Instrumentation *instr,
-@@ -2390,8 +2392,8 @@ ExecCallTriggerFunc(TriggerData *trigdata,
+@@ -2391,8 +2393,8 @@ ExecCallTriggerFunc(TriggerData *trigdata,
  	 * If doing EXPLAIN ANALYZE, stop charging time to this trigger, and count
  	 * one "tuple returned" (really the number of firings).
  	 */
@@ -280,7 +280,7 @@ index 7dc121f73f1..08168633060 100644
  
  	return (HeapTuple) DatumGetPointer(result);
  }
-@@ -2435,6 +2437,7 @@ ExecBSInsertTriggers(EState *estate, ResultRelInfo *relinfo)
+@@ -2436,6 +2438,7 @@ ExecBSInsertTriggers(EState *estate, ResultRelInfo *relinfo)
  
  		LocTriggerData.tg_trigger = trigger;
  		newtuple = ExecCallTriggerFunc(&LocTriggerData,
@@ -288,7 +288,7 @@ index 7dc121f73f1..08168633060 100644
  									   i,
  									   relinfo->ri_TrigFunctions,
  									   relinfo->ri_TrigInstrument,
-@@ -2496,6 +2499,7 @@ ExecBRInsertTriggers(EState *estate, ResultRelInfo *relinfo,
+@@ -2497,6 +2500,7 @@ ExecBRInsertTriggers(EState *estate, ResultRelInfo *relinfo,
  		LocTriggerData.tg_trigtuple = oldtuple = newtuple;
  		LocTriggerData.tg_trigger = trigger;
  		newtuple = ExecCallTriggerFunc(&LocTriggerData,
@@ -296,7 +296,7 @@ index 7dc121f73f1..08168633060 100644
  									   i,
  									   relinfo->ri_TrigFunctions,
  									   relinfo->ri_TrigInstrument,
-@@ -2591,6 +2595,7 @@ ExecIRInsertTriggers(EState *estate, ResultRelInfo *relinfo,
+@@ -2601,6 +2605,7 @@ ExecIRInsertTriggers(EState *estate, ResultRelInfo *relinfo,
  		LocTriggerData.tg_trigtuple = oldtuple = newtuple;
  		LocTriggerData.tg_trigger = trigger;
  		newtuple = ExecCallTriggerFunc(&LocTriggerData,
@@ -304,7 +304,7 @@ index 7dc121f73f1..08168633060 100644
  									   i,
  									   relinfo->ri_TrigFunctions,
  									   relinfo->ri_TrigInstrument,
-@@ -2655,6 +2660,7 @@ ExecBSDeleteTriggers(EState *estate, ResultRelInfo *relinfo)
+@@ -2665,6 +2670,7 @@ ExecBSDeleteTriggers(EState *estate, ResultRelInfo *relinfo)
  
  		LocTriggerData.tg_trigger = trigger;
  		newtuple = ExecCallTriggerFunc(&LocTriggerData,
@@ -312,7 +312,7 @@ index 7dc121f73f1..08168633060 100644
  									   i,
  									   relinfo->ri_TrigFunctions,
  									   relinfo->ri_TrigInstrument,
-@@ -2765,6 +2771,7 @@ ExecBRDeleteTriggers(EState *estate, EPQState *epqstate,
+@@ -2775,6 +2781,7 @@ ExecBRDeleteTriggers(EState *estate, EPQState *epqstate,
  		LocTriggerData.tg_trigtuple = trigtuple;
  		LocTriggerData.tg_trigger = trigger;
  		newtuple = ExecCallTriggerFunc(&LocTriggerData,
@@ -320,7 +320,7 @@ index 7dc121f73f1..08168633060 100644
  									   i,
  									   relinfo->ri_TrigFunctions,
  									   relinfo->ri_TrigInstrument,
-@@ -2860,6 +2867,7 @@ ExecIRDeleteTriggers(EState *estate, ResultRelInfo *relinfo,
+@@ -2879,6 +2886,7 @@ ExecIRDeleteTriggers(EState *estate, ResultRelInfo *relinfo,
  		LocTriggerData.tg_trigtuple = trigtuple;
  		LocTriggerData.tg_trigger = trigger;
  		rettuple = ExecCallTriggerFunc(&LocTriggerData,
@@ -328,7 +328,7 @@ index 7dc121f73f1..08168633060 100644
  									   i,
  									   relinfo->ri_TrigFunctions,
  									   relinfo->ri_TrigInstrument,
-@@ -2918,6 +2926,7 @@ ExecBSUpdateTriggers(EState *estate, ResultRelInfo *relinfo)
+@@ -2937,6 +2945,7 @@ ExecBSUpdateTriggers(EState *estate, ResultRelInfo *relinfo)
  
  		LocTriggerData.tg_trigger = trigger;
  		newtuple = ExecCallTriggerFunc(&LocTriggerData,
@@ -336,7 +336,7 @@ index 7dc121f73f1..08168633060 100644
  									   i,
  									   relinfo->ri_TrigFunctions,
  									   relinfo->ri_TrigInstrument,
-@@ -3070,6 +3079,7 @@ ExecBRUpdateTriggers(EState *estate, EPQState *epqstate,
+@@ -3089,6 +3098,7 @@ ExecBRUpdateTriggers(EState *estate, EPQState *epqstate,
  		LocTriggerData.tg_newslot = newslot;
  		LocTriggerData.tg_trigger = trigger;
  		newtuple = ExecCallTriggerFunc(&LocTriggerData,
@@ -344,7 +344,7 @@ index 7dc121f73f1..08168633060 100644
  									   i,
  									   relinfo->ri_TrigFunctions,
  									   relinfo->ri_TrigInstrument,
-@@ -3224,6 +3234,7 @@ ExecIRUpdateTriggers(EState *estate, ResultRelInfo *relinfo,
+@@ -3253,6 +3263,7 @@ ExecIRUpdateTriggers(EState *estate, ResultRelInfo *relinfo,
  
  		LocTriggerData.tg_trigger = trigger;
  		newtuple = ExecCallTriggerFunc(&LocTriggerData,
@@ -352,7 +352,7 @@ index 7dc121f73f1..08168633060 100644
  									   i,
  									   relinfo->ri_TrigFunctions,
  									   relinfo->ri_TrigInstrument,
-@@ -3282,6 +3293,7 @@ ExecBSTruncateTriggers(EState *estate, ResultRelInfo *relinfo)
+@@ -3311,6 +3322,7 @@ ExecBSTruncateTriggers(EState *estate, ResultRelInfo *relinfo)
  
  		LocTriggerData.tg_trigger = trigger;
  		newtuple = ExecCallTriggerFunc(&LocTriggerData,
@@ -360,7 +360,7 @@ index 7dc121f73f1..08168633060 100644
  									   i,
  									   relinfo->ri_TrigFunctions,
  									   relinfo->ri_TrigInstrument,
-@@ -4543,6 +4555,7 @@ AfterTriggerExecute(EState *estate,
+@@ -4572,6 +4584,7 @@ AfterTriggerExecute(EState *estate,
  	 * (Don't let ExecCallTriggerFunc measure EXPLAIN time.)
  	 */
  	rettuple = ExecCallTriggerFunc(&LocTriggerData,
@@ -368,7 +368,7 @@ index 7dc121f73f1..08168633060 100644
  								   tgindx,
  								   finfo,
  								   NULL,
-@@ -4577,8 +4590,8 @@ AfterTriggerExecute(EState *estate,
+@@ -4606,8 +4619,8 @@ AfterTriggerExecute(EState *estate,
  	 * If doing EXPLAIN ANALYZE, stop charging time to this trigger, and count
  	 * one "tuple returned" (really the number of firings).
  	 */
@@ -428,10 +428,10 @@ index 5d3cabe73e3..1912e130275 100644
  
  /*
 diff --git a/src/backend/executor/execMain.c b/src/backend/executor/execMain.c
-index 0391798dd2c..0b61bce6c75 100644
+index 27c9eec697b..b8c553a400e 100644
 --- a/src/backend/executor/execMain.c
 +++ b/src/backend/executor/execMain.c
-@@ -384,7 +384,7 @@ standard_ExecutorRun(QueryDesc *queryDesc,
+@@ -383,7 +383,7 @@ standard_ExecutorRun(QueryDesc *queryDesc,
  		dest->rShutdown(dest);
  
  	if (queryDesc->totaltime)
@@ -440,7 +440,7 @@ index 0391798dd2c..0b61bce6c75 100644
  
  	MemoryContextSwitchTo(oldcontext);
  }
-@@ -444,7 +444,7 @@ standard_ExecutorFinish(QueryDesc *queryDesc)
+@@ -443,7 +443,7 @@ standard_ExecutorFinish(QueryDesc *queryDesc)
  		AfterTriggerEndQuery(estate);
  
  	if (queryDesc->totaltime)
@@ -450,10 +450,10 @@ index 0391798dd2c..0b61bce6c75 100644
  	MemoryContextSwitchTo(oldcontext);
  
 diff --git a/src/backend/executor/execParallel.c b/src/backend/executor/execParallel.c
-index f098a5557cf..c7af573a646 100644
+index 0125464d942..3c2161d0120 100644
 --- a/src/backend/executor/execParallel.c
 +++ b/src/backend/executor/execParallel.c
-@@ -139,6 +139,71 @@ static bool ExecParallelRetrieveInstrumentation(PlanState *planstate,
+@@ -140,6 +140,71 @@ static bool ExecParallelRetrieveInstrumentation(PlanState *planstate,
  /* Helper function that runs in the parallel worker. */
  static DestReceiver *ExecParallelGetReceiver(dsm_segment *seg, shm_toc *toc);
  
@@ -525,7 +525,7 @@ index f098a5557cf..c7af573a646 100644
  /*
   * Create a serialized representation of the plan to be sent to each worker.
   */
-@@ -1054,7 +1119,7 @@ ExecParallelRetrieveInstrumentation(PlanState *planstate,
+@@ -1070,7 +1135,7 @@ ExecParallelRetrieveInstrumentation(PlanState *planstate,
  	instrument = GetInstrumentationArray(instrumentation);
  	instrument += i * instrumentation->num_workers;
  	for (n = 0; n < instrumentation->num_workers; ++n)
@@ -534,7 +534,7 @@ index f098a5557cf..c7af573a646 100644
  
  	/*
  	 * Also store the per-worker detail.
-@@ -1298,7 +1363,7 @@ ExecParallelReportInstrumentation(PlanState *planstate,
+@@ -1314,7 +1379,7 @@ ExecParallelReportInstrumentation(PlanState *planstate,
  	int			plan_node_id = planstate->plan->plan_node_id;
  	Instrumentation *instrument;
  
@@ -543,14 +543,14 @@ index f098a5557cf..c7af573a646 100644
  
  	/*
  	 * If we shuffled the plan_node_id values in ps_instrument into sorted
-@@ -1320,6 +1385,14 @@ ExecParallelReportInstrumentation(PlanState *planstate,
+@@ -1336,6 +1401,14 @@ ExecParallelReportInstrumentation(PlanState *planstate,
  	instrument += i * instrumentation->num_workers;
  	Assert(IsParallelWorker());
  	Assert(ParallelWorkerNumber < instrumentation->num_workers);
 +
 +	/*
-+	 * To aggregate the data, we temporarily restore the tuplecount and running
-+	 * fields to the Instrument structure.
++	 * To aggregate the data, we temporarily restore the tuplecount and
++	 * running fields to the Instrument structure.
 +	 */
 +	planstate->instrument->tuplecount = get_tuplecount(planstate);
 +	planstate->instrument->running = is_running_true(planstate) ? true : false;
@@ -631,7 +631,7 @@ index f5f9cfbeead..ff370a4ae2f 100644
  	return false;
  }
 diff --git a/src/backend/executor/instrument.c b/src/backend/executor/instrument.c
-index 56e635f4700..7cbaf5e4817 100644
+index 9e11c662a7c..f5eda847441 100644
 --- a/src/backend/executor/instrument.c
 +++ b/src/backend/executor/instrument.c
 @@ -22,8 +22,8 @@ static BufferUsage save_pgBufferUsage;
@@ -802,10 +802,10 @@ index 56e635f4700..7cbaf5e4817 100644
  {
  	dst->wal_bytes += add->wal_bytes;
 diff --git a/src/backend/executor/nodeAgg.c b/src/backend/executor/nodeAgg.c
-index 377e016d732..d824d506c10 100644
+index 0b02fd32107..c0ae21ee9fc 100644
 --- a/src/backend/executor/nodeAgg.c
 +++ b/src/backend/executor/nodeAgg.c
-@@ -2267,10 +2267,10 @@ ExecAgg(PlanState *pstate)
+@@ -2268,10 +2268,10 @@ ExecAgg(PlanState *pstate)
  		}
  
  		if (!TupIsNull(result))
@@ -1094,10 +1094,10 @@ index dc7d1830259..2532a6bab4c 100644
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeGatherMerge.c b/src/backend/executor/nodeGatherMerge.c
-index 15f84597067..fc013107177 100644
+index 93f3dbc6cf4..e941baa2323 100644
 --- a/src/backend/executor/nodeGatherMerge.c
 +++ b/src/backend/executor/nodeGatherMerge.c
-@@ -185,6 +185,7 @@ ExecGatherMerge(PlanState *pstate)
+@@ -186,6 +186,7 @@ ExecGatherMerge(PlanState *pstate)
  	GatherMergeState *node = castNode(GatherMergeState, pstate);
  	TupleTableSlot *slot;
  	ExprContext *econtext;
@@ -1105,7 +1105,7 @@ index 15f84597067..fc013107177 100644
  
  	CHECK_FOR_INTERRUPTS();
  
-@@ -268,17 +269,18 @@ ExecGatherMerge(PlanState *pstate)
+@@ -269,17 +270,18 @@ ExecGatherMerge(PlanState *pstate)
  	 */
  	slot = gather_merge_getnext(node);
  	if (TupIsNull(slot))
@@ -1188,10 +1188,10 @@ index 05fdd96f835..768f7a47112 100644
  		else
  			InstrCountFiltered1(node, 1);
 diff --git a/src/backend/executor/nodeHash.c b/src/backend/executor/nodeHash.c
-index 8d2201ab67f..5d5c62f2ccf 100644
+index 88441859bf9..9e3a6f72e6e 100644
 --- a/src/backend/executor/nodeHash.c
 +++ b/src/backend/executor/nodeHash.c
-@@ -91,7 +91,7 @@ static TupleTableSlot *
+@@ -90,7 +90,7 @@ static TupleTableSlot *
  ExecHash(PlanState *pstate)
  {
  	elog(ERROR, "Hash node does not support ExecProcNode call convention");
@@ -1200,7 +1200,7 @@ index 8d2201ab67f..5d5c62f2ccf 100644
  }
  
  /* ----------------------------------------------------------------
-@@ -115,7 +115,7 @@ MultiExecHash(HashState *node)
+@@ -114,7 +114,7 @@ MultiExecHash(HashState *node)
  
  	/* must provide our own instrumentation support */
  	if (node->ps.instrument)
@@ -1297,7 +1297,7 @@ index f464cca9507..831b62ed1c6 100644
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeIndexscan.c b/src/backend/executor/nodeIndexscan.c
-index 7fcaa37fe62..1eaa5f0ba3f 100644
+index f36929deec3..c1722824f25 100644
 --- a/src/backend/executor/nodeIndexscan.c
 +++ b/src/backend/executor/nodeIndexscan.c
 @@ -521,6 +521,7 @@ static TupleTableSlot *
@@ -1489,7 +1489,7 @@ index a8afbf93b48..d569b2fa017 100644
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeMaterial.c b/src/backend/executor/nodeMaterial.c
-index 9798bb75365..b0179dcc0c5 100644
+index 9798bb75365..d960833c341 100644
 --- a/src/backend/executor/nodeMaterial.c
 +++ b/src/backend/executor/nodeMaterial.c
 @@ -45,6 +45,7 @@ ExecMaterial(PlanState *pstate)
@@ -1500,16 +1500,17 @@ index 9798bb75365..b0179dcc0c5 100644
  
  	CHECK_FOR_INTERRUPTS();
  
-@@ -96,7 +97,7 @@ ExecMaterial(PlanState *pstate)
+@@ -96,7 +97,8 @@ ExecMaterial(PlanState *pstate)
  			 * fetch.
  			 */
  			if (!tuplestore_advance(tuplestorestate, forward))
 -				return NULL;	/* the tuplestore must be empty */
-+				return PostExecProcNodeInstr(pstate, NULL);	/* the tuplestore must be empty */
++				return PostExecProcNodeInstr(pstate, NULL); /* the tuplestore must
++															 * be empty */
  		}
  		eof_tuplestore = false;
  	}
-@@ -108,7 +109,8 @@ ExecMaterial(PlanState *pstate)
+@@ -108,7 +110,8 @@ ExecMaterial(PlanState *pstate)
  	if (!eof_tuplestore)
  	{
  		if (tuplestore_gettupleslot(tuplestorestate, forward, false, slot))
@@ -1519,7 +1520,7 @@ index 9798bb75365..b0179dcc0c5 100644
  		if (forward)
  			eof_tuplestore = true;
  	}
-@@ -135,7 +137,7 @@ ExecMaterial(PlanState *pstate)
+@@ -135,7 +138,7 @@ ExecMaterial(PlanState *pstate)
  		if (TupIsNull(outerslot))
  		{
  			node->eof_underlying = true;
@@ -1528,7 +1529,7 @@ index 9798bb75365..b0179dcc0c5 100644
  		}
  
  		/*
-@@ -147,13 +149,14 @@ ExecMaterial(PlanState *pstate)
+@@ -147,13 +150,14 @@ ExecMaterial(PlanState *pstate)
  			tuplestore_puttupleslot(tuplestorestate, outerslot);
  
  		ExecCopySlot(slot, outerslot);
@@ -1546,10 +1547,10 @@ index 9798bb75365..b0179dcc0c5 100644
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeMemoize.c b/src/backend/executor/nodeMemoize.c
-index 609deb12afb..a11c946d324 100644
+index d652663cb6a..d29ed16940b 100644
 --- a/src/backend/executor/nodeMemoize.c
 +++ b/src/backend/executor/nodeMemoize.c
-@@ -760,12 +760,12 @@ ExecMemoize(PlanState *pstate)
+@@ -761,12 +761,12 @@ ExecMemoize(PlanState *pstate)
  						ExecStoreMinimalTuple(entry->tuplehead->mintuple,
  											  slot, false);
  
@@ -1564,7 +1565,7 @@ index 609deb12afb..a11c946d324 100644
  				}
  
  				/* Handle cache miss */
-@@ -800,7 +800,7 @@ ExecMemoize(PlanState *pstate)
+@@ -801,7 +801,7 @@ ExecMemoize(PlanState *pstate)
  						entry->complete = true;
  
  					node->mstatus = MEMO_END_OF_SCAN;
@@ -1573,7 +1574,7 @@ index 609deb12afb..a11c946d324 100644
  				}
  
  				node->entry = entry;
-@@ -835,7 +835,7 @@ ExecMemoize(PlanState *pstate)
+@@ -836,7 +836,7 @@ ExecMemoize(PlanState *pstate)
  
  				slot = node->ss.ps.ps_ResultTupleSlot;
  				ExecCopySlot(slot, outerslot);
@@ -1582,7 +1583,7 @@ index 609deb12afb..a11c946d324 100644
  			}
  
  		case MEMO_CACHE_FETCH_NEXT_TUPLE:
-@@ -851,14 +851,14 @@ ExecMemoize(PlanState *pstate)
+@@ -852,14 +852,14 @@ ExecMemoize(PlanState *pstate)
  				if (node->last_tuple == NULL)
  				{
  					node->mstatus = MEMO_END_OF_SCAN;
@@ -1599,7 +1600,7 @@ index 609deb12afb..a11c946d324 100644
  			}
  
  		case MEMO_FILLING_CACHE:
-@@ -881,7 +881,7 @@ ExecMemoize(PlanState *pstate)
+@@ -882,7 +882,7 @@ ExecMemoize(PlanState *pstate)
  					/* No more tuples.  Mark it as complete */
  					entry->complete = true;
  					node->mstatus = MEMO_END_OF_SCAN;
@@ -1608,7 +1609,7 @@ index 609deb12afb..a11c946d324 100644
  				}
  
  				/*
-@@ -908,7 +908,7 @@ ExecMemoize(PlanState *pstate)
+@@ -909,7 +909,7 @@ ExecMemoize(PlanState *pstate)
  
  				slot = node->ss.ps.ps_ResultTupleSlot;
  				ExecCopySlot(slot, outerslot);
@@ -1617,7 +1618,7 @@ index 609deb12afb..a11c946d324 100644
  			}
  
  		case MEMO_CACHE_BYPASS_MODE:
-@@ -925,12 +925,12 @@ ExecMemoize(PlanState *pstate)
+@@ -926,12 +926,12 @@ ExecMemoize(PlanState *pstate)
  				if (TupIsNull(outerslot))
  				{
  					node->mstatus = MEMO_END_OF_SCAN;
@@ -1632,7 +1633,7 @@ index 609deb12afb..a11c946d324 100644
  			}
  
  		case MEMO_END_OF_SCAN:
-@@ -939,12 +939,13 @@ ExecMemoize(PlanState *pstate)
+@@ -940,12 +940,13 @@ ExecMemoize(PlanState *pstate)
  			 * We've already returned NULL for this scan, but just in case
  			 * something calls us again by mistake.
  			 */
@@ -1840,10 +1841,10 @@ index a233313128a..d757396c4c9 100644
  
  				/* Else remain in ENDINNER state and process next tuple. */
 diff --git a/src/backend/executor/nodeModifyTable.c b/src/backend/executor/nodeModifyTable.c
-index 7c6c2c1f6e4..1cece834ae8 100644
+index e44f1223886..1c2588f24b5 100644
 --- a/src/backend/executor/nodeModifyTable.c
 +++ b/src/backend/executor/nodeModifyTable.c
-@@ -4172,7 +4172,7 @@ ExecModifyTable(PlanState *pstate)
+@@ -4196,7 +4196,7 @@ ExecModifyTable(PlanState *pstate)
  	 * extra times.
  	 */
  	if (node->mt_done)
@@ -1852,7 +1853,7 @@ index 7c6c2c1f6e4..1cece834ae8 100644
  
  	/*
  	 * On first call, fire BEFORE STATEMENT triggers before proceeding.
-@@ -4234,7 +4234,7 @@ ExecModifyTable(PlanState *pstate)
+@@ -4258,7 +4258,7 @@ ExecModifyTable(PlanState *pstate)
  			 * continue the work on next call.
  			 */
  			if (slot)
@@ -1861,7 +1862,7 @@ index 7c6c2c1f6e4..1cece834ae8 100644
  
  			continue;			/* continue with the next tuple */
  		}
-@@ -4282,7 +4282,7 @@ ExecModifyTable(PlanState *pstate)
+@@ -4306,7 +4306,7 @@ ExecModifyTable(PlanState *pstate)
  					 * We'll continue the work on next call.
  					 */
  					if (slot)
@@ -1870,7 +1871,7 @@ index 7c6c2c1f6e4..1cece834ae8 100644
  
  					continue;	/* continue with the next tuple */
  				}
-@@ -4319,7 +4319,7 @@ ExecModifyTable(PlanState *pstate)
+@@ -4343,7 +4343,7 @@ ExecModifyTable(PlanState *pstate)
  			slot = ExecProcessReturning(&context, resultRelInfo, operation,
  										NULL, NULL, context.planSlot);
  
@@ -1879,7 +1880,7 @@ index 7c6c2c1f6e4..1cece834ae8 100644
  		}
  
  		EvalPlanQualSetSlot(&node->mt_epqstate, context.planSlot);
-@@ -4375,7 +4375,7 @@ ExecModifyTable(PlanState *pstate)
+@@ -4399,7 +4399,7 @@ ExecModifyTable(PlanState *pstate)
  						 * caller.  We'll continue the work on next call.
  						 */
  						if (slot)
@@ -1888,7 +1889,7 @@ index 7c6c2c1f6e4..1cece834ae8 100644
  
  						continue;	/* continue with the next tuple */
  					}
-@@ -4432,7 +4432,7 @@ ExecModifyTable(PlanState *pstate)
+@@ -4456,7 +4456,7 @@ ExecModifyTable(PlanState *pstate)
  						 * caller.  We'll continue the work on next call.
  						 */
  						if (slot)
@@ -1897,7 +1898,7 @@ index 7c6c2c1f6e4..1cece834ae8 100644
  
  						continue;	/* continue with the next tuple */
  					}
-@@ -4533,7 +4533,7 @@ ExecModifyTable(PlanState *pstate)
+@@ -4557,7 +4557,7 @@ ExecModifyTable(PlanState *pstate)
  		 * the work on next call.
  		 */
  		if (slot)
@@ -1906,7 +1907,7 @@ index 7c6c2c1f6e4..1cece834ae8 100644
  	}
  
  	/*
-@@ -4549,7 +4549,7 @@ ExecModifyTable(PlanState *pstate)
+@@ -4573,7 +4573,7 @@ ExecModifyTable(PlanState *pstate)
  
  	node->mt_done = true;
  
@@ -2019,10 +2020,10 @@ index 880f39fb2ff..3d2fd3569ec 100644
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeRecursiveunion.c b/src/backend/executor/nodeRecursiveunion.c
-index 40f66fd0680..e712e2bea59 100644
+index cd0ad51dcd2..fc67d15a0ec 100644
 --- a/src/backend/executor/nodeRecursiveunion.c
 +++ b/src/backend/executor/nodeRecursiveunion.c
-@@ -110,7 +110,7 @@ ExecRecursiveUnion(PlanState *pstate)
+@@ -109,7 +109,7 @@ ExecRecursiveUnion(PlanState *pstate)
  			/* Each non-duplicate tuple goes to the working table ... */
  			tuplestore_puttupleslot(node->working_table, slot);
  			/* ... and to the caller */
@@ -2031,7 +2032,7 @@ index 40f66fd0680..e712e2bea59 100644
  		}
  		node->recursing = true;
  	}
-@@ -166,10 +166,10 @@ ExecRecursiveUnion(PlanState *pstate)
+@@ -165,10 +165,10 @@ ExecRecursiveUnion(PlanState *pstate)
  		node->intermediate_empty = false;
  		tuplestore_puttupleslot(node->intermediate_table, slot);
  		/* ... and return it */
@@ -2112,7 +2113,7 @@ index 6b3db7548ed..6a1b0994dc0 100644
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeSeqscan.c b/src/backend/executor/nodeSeqscan.c
-index ed35c58c2c3..0a3bfa335c3 100644
+index 94047d29430..ae25a61ee40 100644
 --- a/src/backend/executor/nodeSeqscan.c
 +++ b/src/backend/executor/nodeSeqscan.c
 @@ -109,18 +109,21 @@ SeqRecheck(SeqScanState *node, TupleTableSlot *slot)
@@ -2143,15 +2144,16 @@ index ed35c58c2c3..0a3bfa335c3 100644
  }
  
  /*
-@@ -129,18 +132,21 @@ ExecSeqScan(PlanState *pstate)
+@@ -129,6 +132,7 @@ ExecSeqScan(PlanState *pstate)
  static TupleTableSlot *
  ExecSeqScanWithQual(PlanState *pstate)
  {
 +	TupleTableSlot *result;
  	SeqScanState *node = castNode(SeqScanState, pstate);
  
- 	Assert(pstate->state->es_epq_active == NULL);
- 	Assert(pstate->qual != NULL);
+ 	/*
+@@ -139,12 +143,14 @@ ExecSeqScanWithQual(PlanState *pstate)
+ 	pg_assume(pstate->qual != NULL);
  	Assert(pstate->ps_ProjInfo == NULL);
  
 -	return ExecScanExtended(&node->ss,
@@ -2171,7 +2173,7 @@ index ed35c58c2c3..0a3bfa335c3 100644
  }
  
  /*
-@@ -149,18 +155,21 @@ ExecSeqScanWithQual(PlanState *pstate)
+@@ -153,18 +159,21 @@ ExecSeqScanWithQual(PlanState *pstate)
  static TupleTableSlot *
  ExecSeqScanWithProject(PlanState *pstate)
  {
@@ -2180,7 +2182,7 @@ index ed35c58c2c3..0a3bfa335c3 100644
  
  	Assert(pstate->state->es_epq_active == NULL);
  	Assert(pstate->qual == NULL);
- 	Assert(pstate->ps_ProjInfo != NULL);
+ 	pg_assume(pstate->ps_ProjInfo != NULL);
  
 -	return ExecScanExtended(&node->ss,
 -							(ExecScanAccessMtd) SeqNext,
@@ -2199,7 +2201,7 @@ index ed35c58c2c3..0a3bfa335c3 100644
  }
  
  /*
-@@ -170,18 +179,21 @@ ExecSeqScanWithProject(PlanState *pstate)
+@@ -174,18 +183,21 @@ ExecSeqScanWithProject(PlanState *pstate)
  static TupleTableSlot *
  ExecSeqScanWithQualProject(PlanState *pstate)
  {
@@ -2207,8 +2209,8 @@ index ed35c58c2c3..0a3bfa335c3 100644
  	SeqScanState *node = castNode(SeqScanState, pstate);
  
  	Assert(pstate->state->es_epq_active == NULL);
- 	Assert(pstate->qual != NULL);
- 	Assert(pstate->ps_ProjInfo != NULL);
+ 	pg_assume(pstate->qual != NULL);
+ 	pg_assume(pstate->ps_ProjInfo != NULL);
  
 -	return ExecScanExtended(&node->ss,
 -							(ExecScanAccessMtd) SeqNext,
@@ -2227,7 +2229,7 @@ index ed35c58c2c3..0a3bfa335c3 100644
  }
  
  /*
-@@ -192,11 +204,14 @@ ExecSeqScanWithQualProject(PlanState *pstate)
+@@ -196,11 +208,14 @@ ExecSeqScanWithQualProject(PlanState *pstate)
  static TupleTableSlot *
  ExecSeqScanEPQ(PlanState *pstate)
  {
@@ -2246,10 +2248,10 @@ index ed35c58c2c3..0a3bfa335c3 100644
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeSetOp.c b/src/backend/executor/nodeSetOp.c
-index 4068481a523..a009cfe1a3c 100644
+index 9e0f9274fb1..51d3fa38d5f 100644
 --- a/src/backend/executor/nodeSetOp.c
 +++ b/src/backend/executor/nodeSetOp.c
-@@ -159,6 +159,7 @@ set_output_count(SetOpState *setopstate, SetOpStatePerGroup pergroup)
+@@ -167,6 +167,7 @@ set_output_count(SetOpState *setopstate, SetOpStatePerGroup pergroup)
  static TupleTableSlot *			/* return: a tuple or NULL */
  ExecSetOp(PlanState *pstate)
  {
@@ -2257,7 +2259,7 @@ index 4068481a523..a009cfe1a3c 100644
  	SetOpState *node = castNode(SetOpState, pstate);
  	SetOp	   *plannode = (SetOp *) node->ps.plan;
  	TupleTableSlot *resultTupleSlot = node->ps.ps_ResultTupleSlot;
-@@ -172,22 +173,27 @@ ExecSetOp(PlanState *pstate)
+@@ -180,22 +181,27 @@ ExecSetOp(PlanState *pstate)
  	if (node->numOutput > 0)
  	{
  		node->numOutput--;
@@ -2325,7 +2327,7 @@ index 8dd1ae46308..c7d6a0f9078 100644
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeTableFuncscan.c b/src/backend/executor/nodeTableFuncscan.c
-index 83ade3f9437..21f13f9fa14 100644
+index 4bae685d45a..16cd0390723 100644
 --- a/src/backend/executor/nodeTableFuncscan.c
 +++ b/src/backend/executor/nodeTableFuncscan.c
 @@ -96,11 +96,14 @@ TableFuncRecheck(TableFuncScanState *node, TupleTableSlot *slot)
@@ -2347,10 +2349,10 @@ index 83ade3f9437..21f13f9fa14 100644
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeTidrangescan.c b/src/backend/executor/nodeTidrangescan.c
-index 26f7420b64b..3f21c07a2df 100644
+index 6fd9f68cddd..ba4f4f3ee1b 100644
 --- a/src/backend/executor/nodeTidrangescan.c
 +++ b/src/backend/executor/nodeTidrangescan.c
-@@ -295,11 +295,14 @@ TidRangeRecheck(TidRangeScanState *node, TupleTableSlot *slot)
+@@ -305,11 +305,14 @@ TidRangeRecheck(TidRangeScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecTidRangeScan(PlanState *pstate)
  {
@@ -2369,10 +2371,10 @@ index 26f7420b64b..3f21c07a2df 100644
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeTidscan.c b/src/backend/executor/nodeTidscan.c
-index 5e56e29a15f..e2050de4123 100644
+index d50c6600358..969b5f3d598 100644
 --- a/src/backend/executor/nodeTidscan.c
 +++ b/src/backend/executor/nodeTidscan.c
-@@ -432,11 +432,14 @@ TidRecheck(TidScanState *node, TupleTableSlot *slot)
+@@ -443,11 +443,14 @@ TidRecheck(TidScanState *node, TupleTableSlot *slot)
  static TupleTableSlot *
  ExecTidScan(PlanState *pstate)
  {
@@ -2444,10 +2446,10 @@ index 8e85a5f2e9a..950776feab4 100644
  
  /* ----------------------------------------------------------------
 diff --git a/src/backend/executor/nodeWindowAgg.c b/src/backend/executor/nodeWindowAgg.c
-index 9a1acce2b5d..c5ff6714ed5 100644
+index 3a0d1f0c922..43fbddd7d02 100644
 --- a/src/backend/executor/nodeWindowAgg.c
 +++ b/src/backend/executor/nodeWindowAgg.c
-@@ -2171,7 +2171,7 @@ ExecWindowAgg(PlanState *pstate)
+@@ -2238,7 +2238,7 @@ ExecWindowAgg(PlanState *pstate)
  	CHECK_FOR_INTERRUPTS();
  
  	if (winstate->status == WINDOWAGG_DONE)
@@ -2456,7 +2458,7 @@ index 9a1acce2b5d..c5ff6714ed5 100644
  
  	/*
  	 * Compute frame offset values, if any, during first call (or after a
-@@ -2224,7 +2224,7 @@ ExecWindowAgg(PlanState *pstate)
+@@ -2291,7 +2291,7 @@ ExecWindowAgg(PlanState *pstate)
  			{
  				/* No further partitions?  We're done */
  				winstate->status = WINDOWAGG_DONE;
@@ -2465,7 +2467,7 @@ index 9a1acce2b5d..c5ff6714ed5 100644
  			}
  		}
  
-@@ -2393,7 +2393,7 @@ ExecWindowAgg(PlanState *pstate)
+@@ -2460,7 +2460,7 @@ ExecWindowAgg(PlanState *pstate)
  					 * Nothing else will match the runcondition.
  					 */
  					winstate->status = WINDOWAGG_DONE;
@@ -2474,7 +2476,7 @@ index 9a1acce2b5d..c5ff6714ed5 100644
  				}
  			}
  
-@@ -2417,7 +2417,7 @@ ExecWindowAgg(PlanState *pstate)
+@@ -2484,7 +2484,7 @@ ExecWindowAgg(PlanState *pstate)
  			break;
  	}
  
@@ -2511,22 +2513,22 @@ index f6379c35d2f..1b4afc6d05f 100644
  
  
 diff --git a/src/include/executor/execdesc.h b/src/include/executor/execdesc.h
-index 86db3dc8d0d..e1aac4c6d27 100644
+index 86db3dc8d0d..a47fd6eafc4 100644
 --- a/src/include/executor/execdesc.h
 +++ b/src/include/executor/execdesc.h
 @@ -51,6 +51,7 @@ typedef struct QueryDesc
  	/* This field is set by ExecutePlan */
  	bool		already_executed;	/* true if previously executed */
  
-+	uint64_t    hot_instr;		/* bit 0: running, bit 1-63: tuplecount */
++	uint64_t	hot_instr;		/* bit 0: running, bit 1-63: tuplecount */
  	/* This is always set NULL by the core system, but plugins can change it */
  	struct Instrumentation *totaltime;	/* total time spent in ExecutorRun */
  } QueryDesc;
 diff --git a/src/include/executor/executor.h b/src/include/executor/executor.h
-index 104b059544d..36f8b78cd14 100644
+index fa2b657fb2f..25377377a7d 100644
 --- a/src/include/executor/executor.h
 +++ b/src/include/executor/executor.h
-@@ -296,7 +296,6 @@ extern void ExecEndNode(PlanState *node);
+@@ -302,7 +302,6 @@ extern void ExecEndNode(PlanState *node);
  extern void ExecShutdownNode(PlanState *node);
  extern void ExecSetTupleBound(int64 tuples_needed, PlanState *child_node);
  
@@ -2534,7 +2536,7 @@ index 104b059544d..36f8b78cd14 100644
  /* ----------------------------------------------------------------
   *		ExecProcNode
   *
-@@ -314,6 +313,40 @@ ExecProcNode(PlanState *node)
+@@ -320,6 +319,40 @@ ExecProcNode(PlanState *node)
  }
  #endif
  
@@ -2550,9 +2552,9 @@ index 104b059544d..36f8b78cd14 100644
 +static pg_attribute_always_inline TupleTableSlot *
 +PostExecProcNodeInstr(PlanState *node, TupleTableSlot *result)
 +{
-+	uint64_t current = node->hot_instr;
++	uint64_t	current = node->hot_instr;
 +
-+	if ((current & FAST_PATH_INSTR_MASK) == 0) /* is_fast_path_instr_false(node) */
++	if ((current & FAST_PATH_INSTR_MASK) == 0)	/* is_fast_path_instr_false(node) */
 +		return result;
 +
 +	if (!TupIsNull(result))
@@ -2576,7 +2578,7 @@ index 104b059544d..36f8b78cd14 100644
   * prototypes from functions in execExpr.c
   */
 diff --git a/src/include/executor/instrument.h b/src/include/executor/instrument.h
-index 03653ab6c6c..d6e18401fc1 100644
+index ffe470f2b84..23982c68f63 100644
 --- a/src/include/executor/instrument.h
 +++ b/src/include/executor/instrument.h
 @@ -15,7 +15,6 @@
@@ -2587,7 +2589,7 @@ index 03653ab6c6c..d6e18401fc1 100644
  /*
   * BufferUsage and WalUsage counters keep being incremented infinitely,
   * i.e., must never be reset to zero, so that we can calculate how much
-@@ -66,33 +65,39 @@ typedef enum InstrumentOption
+@@ -67,33 +66,39 @@ typedef enum InstrumentOption
  	INSTRUMENT_ALL = PG_INT32_MAX
  } InstrumentOption;
  
@@ -2595,11 +2597,11 @@ index 03653ab6c6c..d6e18401fc1 100644
  typedef struct Instrumentation
  {
 +	/*
-+	 * These are used exclusively by InstrStopQueryDesc(), which is defined below,
-+	 * and ExecParallelReportInstrumentation().
++	 * These are used exclusively by InstrStopQueryDesc(), which is defined
++	 * below, and ExecParallelReportInstrumentation().
 +	 */
-+	uint64_t tuplecount;
-+	bool running;
++	uint64_t	tuplecount;
++	bool		running;
  	/* Parameters set at node creation: */
  	bool		need_timer;		/* true if we need timer data */
  	bool		need_bufusage;	/* true if we need buffer usage data */
@@ -2619,9 +2621,9 @@ index 03653ab6c6c..d6e18401fc1 100644
 -	double		ntuples;		/* total tuples produced */
 -	double		ntuples2;		/* secondary node-specific tuple counter */
 -	double		nloops;			/* # of run cycles for this node */
-+	uint64_t 	ntuples;		/* total tuples produced */
-+	uint64_t 	ntuples2;		/* secondary node-specific tuple counter */
-+	uint64_t 	nloops;			/* # of run cycles for this node */
++	uint64_t	ntuples;		/* total tuples produced */
++	uint64_t	ntuples2;		/* secondary node-specific tuple counter */
++	uint64_t	nloops;			/* # of run cycles for this node */
  	double		nfiltered1;		/* # of tuples removed by scanqual or joinqual */
  	double		nfiltered2;		/* # of tuples removed by "other" quals */
  	BufferUsage bufusage;		/* total buffer usage */
@@ -2632,7 +2634,7 @@ index 03653ab6c6c..d6e18401fc1 100644
  typedef struct WorkerInstrumentation
  {
  	int			num_workers;	/* # of structures that follow */
-@@ -105,17 +110,81 @@ extern PGDLLIMPORT WalUsage pgWalUsage;
+@@ -106,17 +111,82 @@ extern PGDLLIMPORT WalUsage pgWalUsage;
  extern Instrumentation *InstrAlloc(int n, int instrument_options,
  								   bool async_mode);
  extern void InstrInit(Instrumentation *instr, int instrument_options);
@@ -2641,6 +2643,7 @@ index 03653ab6c6c..d6e18401fc1 100644
 -extern void InstrUpdateTupleCount(Instrumentation *instr, double nTuples);
 -extern void InstrEndLoop(Instrumentation *instr);
 -extern void InstrAggNode(Instrumentation *dst, Instrumentation *add);
++
 +/* extern void InstrAggNode(Instrumentation *dst, Instrumentation *add);*/
  extern void InstrStartParallelQuery(void);
  extern void InstrEndParallelQuery(BufferUsage *bufusage, WalUsage *walusage);
@@ -2672,11 +2675,11 @@ index 03653ab6c6c..d6e18401fc1 100644
 +static pg_attribute_always_inline void
 +InstrStopQueryDesc(Instrumentation *instr, uint64_t nTuples)
 +{
-+	uint64_t        save_tuplecount = instr->tuplecount;
-+	instr_time      endtime;
++	uint64_t	save_tuplecount = instr->tuplecount;
++	instr_time	endtime;
 +
 +	/* count the returned tuples */
-+	instr->tuplecount +=  nTuples;
++	instr->tuplecount += nTuples;
 +
 +	/* let's update the time only if the timer was requested */
 +	if (instr->need_timer)
@@ -2720,28 +2723,30 @@ index 03653ab6c6c..d6e18401fc1 100644
 +
  #endif							/* INSTRUMENT_H */
 diff --git a/src/include/nodes/execnodes.h b/src/include/nodes/execnodes.h
-index e107d6e5f81..3a889d3f47f 100644
+index 64ff6996431..601add7e80b 100644
 --- a/src/include/nodes/execnodes.h
 +++ b/src/include/nodes/execnodes.h
-@@ -522,6 +522,7 @@ typedef struct ResultRelInfo
+@@ -520,6 +520,8 @@ typedef struct ResultRelInfo
  	/* array of trigger WHEN expr states */
  	ExprState **ri_TrigWhenExprs;
  
-+	uint64_t    hot_instr;		/* bit 63: fast_path_instr: bit 62: running, bit 0-61: tuplecount */
++	uint64_t	hot_instr;		/* bit 63: fast_path_instr: bit 62: running,
++								 * bit 0-61: tuplecount */
  	/* optional runtime measurements for triggers */
  	Instrumentation *ri_TrigInstrument;
  
-@@ -1171,7 +1172,9 @@ typedef struct PlanState
+@@ -1172,7 +1174,10 @@ typedef struct PlanState
  	ExecProcNodeMtd ExecProcNodeReal;	/* actual function, if above is a
  										 * wrapper */
  
-+	uint64_t    hot_instr;		/* bit 63: fast_path_instr: bit 62: running, bit 0-61: tuplecount */
++	uint64_t	hot_instr;		/* bit 63: fast_path_instr: bit 62: running,
++								 * bit 0-61: tuplecount */
  	Instrumentation *instrument;	/* Optional runtime stats for this node */
-+	uint64_t    worker_hot_instr;
++	uint64_t	worker_hot_instr;
  	WorkerInstrumentation *worker_instrument;	/* per-worker instrumentation */
  
  	/* Per-worker JIT instrumentation */
-@@ -2930,4 +2933,225 @@ typedef struct LimitState
+@@ -2933,4 +2938,225 @@ typedef struct LimitState
  	TupleTableSlot *last_slot;	/* slot for evaluation of ties */
  } LimitState;
  
@@ -2762,19 +2767,19 @@ index e107d6e5f81..3a889d3f47f 100644
 +#define TUPLECOUNT_MASK ((1ULL << RUNNING_BIT) - 1)  //(0..61)
 +#define MAX_TUPLECOUNT        TUPLECOUNT_MASK
 +
-+// fast_path_instr
++/*  fast_path_instr */
 +#define is_fast_path_instr_true(node)    (((node)->hot_instr & FAST_PATH_INSTR_MASK) != 0)
 +#define is_fast_path_instr_false(node)   (((node)->hot_instr & FAST_PATH_INSTR_MASK) == 0)
 +#define set_fast_path_instr_true(node)   ((node)->hot_instr |= FAST_PATH_INSTR_MASK)
 +#define set_fast_path_instr_false(node)  ((node)->hot_instr &= ~FAST_PATH_INSTR_MASK)
 +
-+// running
++/*  running */
 +#define is_running_true(node)    (((node)->hot_instr & RUNNING_MASK) != 0)
 +#define is_running_false(node)   (((node)->hot_instr & RUNNING_MASK) == 0)
 +#define set_running_true(node)   ((node)->hot_instr |= RUNNING_MASK)
 +#define set_running_false(node)  ((node)->hot_instr &= ~RUNNING_MASK)
 +
-+// tuplecount
++/*  tuplecount */
 +#define get_tuplecount(node)     ((node)->hot_instr & TUPLECOUNT_MASK)
 +#define set_tuplecount(node, n)  \
 +	((node)->hot_instr = ((node)->hot_instr & ~TUPLECOUNT_MASK) | ((n) & TUPLECOUNT_MASK))
@@ -2792,7 +2797,7 @@ index e107d6e5f81..3a889d3f47f 100644
 +InstrStopNode(PlanState *node, uint64_t nTuples)
 +{
 +	Instrumentation *instr = node->instrument;
-+	uint64_t 	save_tuplecount = get_tuplecount(node);
++	uint64_t	save_tuplecount = get_tuplecount(node);
 +	instr_time	endtime;
 +
 +	add_tuplecount(node, nTuples);
@@ -2839,7 +2844,7 @@ index e107d6e5f81..3a889d3f47f 100644
 +static pg_attribute_always_inline void
 +InstrStopNodeTrigger(ResultRelInfo *relInfo, Instrumentation *instr, uint64_t nTuples)
 +{
-+	uint64_t		save_tuplecount = get_tuplecount(relInfo);
++	uint64_t	save_tuplecount = get_tuplecount(relInfo);
 +	instr_time	endtime;
 +
 +	/* count the returned tuples */
