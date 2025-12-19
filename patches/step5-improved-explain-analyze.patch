@@ -580,7 +580,7 @@ index f5f9cfbeead..ff370a4ae2f 100644
 -		node->ExecProcNode = ExecProcNodeInstr;
 +	{
 +		/*--
-+		 * Use node->ExecProcNodeReal, which is modified to call PostExecProcNodeInstr
++		 * Use node->ExecProcNodeReal, which is modified to call ExecNodeRowcountEnd
 +		 * before returning the result, to avoid calling InstrStartNode() and
 +		 * InstrStopNode() when the following conditions are not required:
 +		 * - need_timer
@@ -810,11 +810,11 @@ index 0b02fd32107..c0ae21ee9fc 100644
  
  		if (!TupIsNull(result))
 -			return result;
-+			return PostExecProcNodeInstr(pstate, result);
++			return ExecNodeRowcountEnd(pstate, result);
  	}
  
 -	return NULL;
-+	return PostExecProcNodeInstr(pstate, NULL);
++	return ExecNodeRowcountEnd(pstate, NULL);
  }
  
  /*
@@ -829,7 +829,7 @@ index a11b36c7176..680980e8016 100644
 -			return ExecClearTuple(node->ps.ps_ResultTupleSlot);
 +		{
 +			result = ExecClearTuple(node->ps.ps_ResultTupleSlot);
-+			return PostExecProcNodeInstr(pstate, result);
++			return ExecNodeRowcountEnd(pstate, result);
 +		}
  
  		/* If there are any async subplans, begin executing them. */
@@ -841,7 +841,7 @@ index a11b36c7176..680980e8016 100644
 -			return ExecClearTuple(node->ps.ps_ResultTupleSlot);
 +		{
 +			result = ExecClearTuple(node->ps.ps_ResultTupleSlot);
-+			return PostExecProcNodeInstr(pstate, result);
++			return ExecNodeRowcountEnd(pstate, result);
 +		}
  
  		Assert(node->as_syncdone ||
@@ -851,7 +851,7 @@ index a11b36c7176..680980e8016 100644
  		{
  			if (ExecAppendAsyncGetNext(node, &result))
 -				return result;
-+				return PostExecProcNodeInstr(pstate, result);
++				return ExecNodeRowcountEnd(pstate, result);
 +
  			Assert(!node->as_syncdone);
  			Assert(bms_is_empty(node->as_needrequest));
@@ -861,7 +861,7 @@ index a11b36c7176..680980e8016 100644
  			 * ExecInitAppend; there's no need for it.
  			 */
 -			return result;
-+			return PostExecProcNodeInstr(pstate, result);
++			return ExecNodeRowcountEnd(pstate, result);
  		}
  
  		/*
@@ -872,7 +872,7 @@ index a11b36c7176..680980e8016 100644
 -			return ExecClearTuple(node->ps.ps_ResultTupleSlot);
 +		{
 +			result = ExecClearTuple(node->ps.ps_ResultTupleSlot);
-+			return PostExecProcNodeInstr(pstate, result);
++			return ExecNodeRowcountEnd(pstate, result);
 +		}
  	}
  }
@@ -886,7 +886,7 @@ index 939907b6fcd..09c00630975 100644
  {
  	elog(ERROR, "BitmapAnd node does not support ExecProcNode call convention");
 -	return NULL;
-+	return PostExecProcNodeInstr(pstate, NULL);
++	return ExecNodeRowcountEnd(pstate, NULL);
  }
  
  /* ----------------------------------------------------------------
@@ -917,7 +917,7 @@ index bf24f3d7fe0..35dda3a2d21 100644
 +					  (ExecScanAccessMtd) BitmapHeapNext,
 +					  (ExecScanRecheckMtd) BitmapHeapRecheck);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -930,7 +930,7 @@ index abbb033881a..a589c59e030 100644
  {
  	elog(ERROR, "BitmapIndexScan node does not support ExecProcNode call convention");
 -	return NULL;
-+	return PostExecProcNodeInstr(pstate, NULL);
++	return ExecNodeRowcountEnd(pstate, NULL);
  }
  
  /* ----------------------------------------------------------------
@@ -952,7 +952,7 @@ index 231760ec93d..a2dda0b2053 100644
  {
  	elog(ERROR, "BitmapOr node does not support ExecProcNode call convention");
 -	return NULL;
-+	return PostExecProcNodeInstr(pstate, NULL);
++	return ExecNodeRowcountEnd(pstate, NULL);
  }
  
  /* ----------------------------------------------------------------
@@ -983,7 +983,7 @@ index e1675f66b43..c3a6ebaf475 100644
 +					  (ExecScanAccessMtd) CteScanNext,
 +					  (ExecScanRecheckMtd) CteScanRecheck);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  
@@ -1003,7 +1003,7 @@ index ac2196b64c7..555a9d26814 100644
  	Assert(node->methods->ExecCustomScan != NULL);
 -	return node->methods->ExecCustomScan(node);
 +	result = node->methods->ExecCustomScan(node);
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  void
@@ -1024,7 +1024,7 @@ index 9c56c2f3acf..8816df4850d 100644
  	 */
  	if (estate->es_epq_active != NULL && plan->operation != CMD_SELECT)
 -		return NULL;
-+		return PostExecProcNodeInstr(pstate, NULL);
++		return ExecNodeRowcountEnd(pstate, NULL);
  
 -	return ExecScan(&node->ss,
 -					(ExecScanAccessMtd) ForeignNext,
@@ -1033,7 +1033,7 @@ index 9c56c2f3acf..8816df4850d 100644
 +					  (ExecScanAccessMtd) ForeignNext,
 +					  (ExecScanRecheckMtd) ForeignRecheck);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  
@@ -1055,7 +1055,7 @@ index 644363582d9..fadd9857756 100644
 +					  (ExecScanAccessMtd) FunctionNext,
 +					  (ExecScanRecheckMtd) FunctionRecheck);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -1076,12 +1076,12 @@ index dc7d1830259..2532a6bab4c 100644
  	slot = gather_getnext(node);
  	if (TupIsNull(slot))
 -		return NULL;
-+		return PostExecProcNodeInstr(pstate, NULL);
++		return ExecNodeRowcountEnd(pstate, NULL);
  
  	/* If no projection is required, we're done. */
  	if (node->ps.ps_ProjInfo == NULL)
 -		return slot;
-+		return PostExecProcNodeInstr(pstate, slot);
++		return ExecNodeRowcountEnd(pstate, slot);
  
  	/*
  	 * Form the result tuple using ExecProject(), and return it.
@@ -1089,7 +1089,7 @@ index dc7d1830259..2532a6bab4c 100644
  	econtext->ecxt_outertuple = slot;
 -	return ExecProject(node->ps.ps_ProjInfo);
 +	result = ExecProject(node->ps.ps_ProjInfo);
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -1110,12 +1110,12 @@ index 93f3dbc6cf4..e941baa2323 100644
  	slot = gather_merge_getnext(node);
  	if (TupIsNull(slot))
 -		return NULL;
-+		return PostExecProcNodeInstr(pstate, NULL);
++		return ExecNodeRowcountEnd(pstate, NULL);
  
  	/* If no projection is required, we're done. */
  	if (node->ps.ps_ProjInfo == NULL)
 -		return slot;
-+		return PostExecProcNodeInstr(pstate, slot);
++		return ExecNodeRowcountEnd(pstate, slot);
  
  	/*
  	 * Form the result tuple using ExecProject(), and return it.
@@ -1123,7 +1123,7 @@ index 93f3dbc6cf4..e941baa2323 100644
  	econtext->ecxt_outertuple = slot;
 -	return ExecProject(node->ps.ps_ProjInfo);
 +	result = ExecProject(node->ps.ps_ProjInfo);
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -1144,7 +1144,7 @@ index 05fdd96f835..768f7a47112 100644
  	 */
  	if (node->grp_done)
 -		return NULL;
-+		return PostExecProcNodeInstr(pstate, NULL);
++		return ExecNodeRowcountEnd(pstate, NULL);
 +
  	econtext = node->ss.ps.ps_ExprContext;
  
@@ -1154,7 +1154,7 @@ index 05fdd96f835..768f7a47112 100644
  			/* empty input, so return nothing */
  			node->grp_done = true;
 -			return NULL;
-+			return PostExecProcNodeInstr(pstate, NULL);
++			return ExecNodeRowcountEnd(pstate, NULL);
  		}
  		/* Copy tuple into firsttupleslot */
  		ExecCopySlot(firsttupleslot, outerslot);
@@ -1164,7 +1164,7 @@ index 05fdd96f835..768f7a47112 100644
  			 */
 -			return ExecProject(node->ss.ps.ps_ProjInfo);
 +			result = ExecProject(node->ss.ps.ps_ProjInfo);
-+			return PostExecProcNodeInstr(pstate, result);
++			return ExecNodeRowcountEnd(pstate, result);
  		}
  		else
  			InstrCountFiltered1(node, 1);
@@ -1173,7 +1173,7 @@ index 05fdd96f835..768f7a47112 100644
  				/* no more groups, so we're done */
  				node->grp_done = true;
 -				return NULL;
-+				return PostExecProcNodeInstr(pstate, NULL);
++				return ExecNodeRowcountEnd(pstate, NULL);
  			}
  
  			/*
@@ -1183,7 +1183,7 @@ index 05fdd96f835..768f7a47112 100644
  			 */
 -			return ExecProject(node->ss.ps.ps_ProjInfo);
 +			result = ExecProject(node->ss.ps.ps_ProjInfo);
-+			return PostExecProcNodeInstr(pstate, result);
++			return ExecNodeRowcountEnd(pstate, result);
  		}
  		else
  			InstrCountFiltered1(node, 1);
@@ -1196,7 +1196,7 @@ index 88441859bf9..9e3a6f72e6e 100644
  {
  	elog(ERROR, "Hash node does not support ExecProcNode call convention");
 -	return NULL;
-+	return PostExecProcNodeInstr(pstate, NULL);
++	return ExecNodeRowcountEnd(pstate, NULL);
  }
  
  /* ----------------------------------------------------------------
@@ -1225,7 +1225,7 @@ index 5661ad76830..9d8480b9312 100644
  	 */
 -	return ExecHashJoinImpl(pstate, false);
 +	result = ExecHashJoinImpl(pstate, false);
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -1241,7 +1241,7 @@ index 5661ad76830..9d8480b9312 100644
  	 */
 -	return ExecHashJoinImpl(pstate, true);
 +	result = ExecHashJoinImpl(pstate, true);
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -1254,7 +1254,7 @@ index 975b0397e7a..37283a0f616 100644
  			 * node will fail when trying to fetch too many tuples.
  			 */
 -			return slot;
-+			return PostExecProcNodeInstr(pstate, slot);
++			return ExecNodeRowcountEnd(pstate, slot);
 +
  		else if (node->n_fullsort_remaining > 0)
  		{
@@ -1265,7 +1265,7 @@ index 975b0397e7a..37283a0f616 100644
  								  false, slot, NULL);
 -	return slot;
 +
-+	return PostExecProcNodeInstr(pstate, slot);
++	return ExecNodeRowcountEnd(pstate, slot);
  }
  
  /* ----------------------------------------------------------------
@@ -1292,7 +1292,7 @@ index f464cca9507..831b62ed1c6 100644
 +					  (ExecScanAccessMtd) IndexOnlyNext,
 +					  (ExecScanRecheckMtd) IndexOnlyRecheck);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -1320,7 +1320,7 @@ index f36929deec3..c1722824f25 100644
 +						  (ExecScanAccessMtd) IndexNextWithReorder,
 +						  (ExecScanRecheckMtd) IndexRecheck);
 +
-+		return PostExecProcNodeInstr(pstate, result);
++		return ExecNodeRowcountEnd(pstate, result);
 +	}
  	else
 -		return ExecScan(&node->ss,
@@ -1331,7 +1331,7 @@ index f36929deec3..c1722824f25 100644
 +						  (ExecScanAccessMtd) IndexNext,
 +						  (ExecScanRecheckMtd) IndexRecheck);
 +
-+		return PostExecProcNodeInstr(pstate, result);
++		return ExecNodeRowcountEnd(pstate, result);
 +	}
  }
  
@@ -1345,7 +1345,7 @@ index f957da4470e..9be14360944 100644
  			 */
  			if (!ScanDirectionIsForward(direction))
 -				return NULL;
-+				return PostExecProcNodeInstr(pstate, NULL);
++				return ExecNodeRowcountEnd(pstate, NULL);
  
  			/*
  			 * Check for empty window; if so, treat like empty subplan.
@@ -1354,7 +1354,7 @@ index f957da4470e..9be14360944 100644
  			{
  				node->lstate = LIMIT_EMPTY;
 -				return NULL;
-+				return PostExecProcNodeInstr(pstate, NULL);
++				return ExecNodeRowcountEnd(pstate, NULL);
  			}
  
  			/*
@@ -1363,7 +1363,7 @@ index f957da4470e..9be14360944 100644
  					 */
  					node->lstate = LIMIT_EMPTY;
 -					return NULL;
-+					return PostExecProcNodeInstr(pstate, NULL);
++					return ExecNodeRowcountEnd(pstate, NULL);
  				}
  
  				/*
@@ -1372,7 +1372,7 @@ index f957da4470e..9be14360944 100644
  			 * OFFSET tuples, in general).  So we return no tuples.
  			 */
 -			return NULL;
-+			return PostExecProcNodeInstr(pstate, NULL);
++			return ExecNodeRowcountEnd(pstate, NULL);
  
  		case LIMIT_INWINDOW:
  			if (ScanDirectionIsForward(direction))
@@ -1381,7 +1381,7 @@ index f957da4470e..9be14360944 100644
  					{
  						node->lstate = LIMIT_WINDOWEND;
 -						return NULL;
-+						return PostExecProcNodeInstr(pstate, NULL);
++						return ExecNodeRowcountEnd(pstate, NULL);
  					}
  					else
  					{
@@ -1390,7 +1390,7 @@ index f957da4470e..9be14360944 100644
  					{
  						node->lstate = LIMIT_SUBPLANEOF;
 -						return NULL;
-+						return PostExecProcNodeInstr(pstate, NULL);
++						return ExecNodeRowcountEnd(pstate, NULL);
  					}
  
  					/*
@@ -1399,7 +1399,7 @@ index f957da4470e..9be14360944 100644
  				{
  					node->lstate = LIMIT_WINDOWSTART;
 -					return NULL;
-+					return PostExecProcNodeInstr(pstate, NULL);
++					return ExecNodeRowcountEnd(pstate, NULL);
  				}
  
  				/*
@@ -1408,7 +1408,7 @@ index f957da4470e..9be14360944 100644
  				{
  					node->lstate = LIMIT_SUBPLANEOF;
 -					return NULL;
-+					return PostExecProcNodeInstr(pstate, NULL);
++					return ExecNodeRowcountEnd(pstate, NULL);
  				}
  
  				/*
@@ -1417,7 +1417,7 @@ index f957da4470e..9be14360944 100644
  				{
  					node->lstate = LIMIT_WINDOWEND;
 -					return NULL;
-+					return PostExecProcNodeInstr(pstate, NULL);
++					return ExecNodeRowcountEnd(pstate, NULL);
  				}
  			}
  			else
@@ -1426,7 +1426,7 @@ index f957da4470e..9be14360944 100644
  				{
  					node->lstate = LIMIT_WINDOWSTART;
 -					return NULL;
-+					return PostExecProcNodeInstr(pstate, NULL);
++					return ExecNodeRowcountEnd(pstate, NULL);
  				}
  
  				/*
@@ -1435,7 +1435,7 @@ index f957da4470e..9be14360944 100644
  		case LIMIT_SUBPLANEOF:
  			if (ScanDirectionIsForward(direction))
 -				return NULL;
-+				return PostExecProcNodeInstr(pstate, NULL);
++				return ExecNodeRowcountEnd(pstate, NULL);
  
  			/*
  			 * Backing up from subplan EOF, so re-fetch previous tuple; there
@@ -1444,7 +1444,7 @@ index f957da4470e..9be14360944 100644
  		case LIMIT_WINDOWEND:
  			if (ScanDirectionIsForward(direction))
 -				return NULL;
-+				return PostExecProcNodeInstr(pstate, NULL);
++				return ExecNodeRowcountEnd(pstate, NULL);
  
  			/*
  			 * We already past one position to detect ties so re-fetch
@@ -1453,7 +1453,7 @@ index f957da4470e..9be14360944 100644
  		case LIMIT_WINDOWSTART:
  			if (!ScanDirectionIsForward(direction))
 -				return NULL;
-+				return PostExecProcNodeInstr(pstate, NULL);
++				return ExecNodeRowcountEnd(pstate, NULL);
  
  			/*
  			 * Advancing after having backed off window start: simply
@@ -1462,7 +1462,7 @@ index f957da4470e..9be14360944 100644
  	Assert(!TupIsNull(slot));
  
 -	return slot;
-+	return PostExecProcNodeInstr(pstate, slot);
++	return ExecNodeRowcountEnd(pstate, slot);
  }
  
  /*
@@ -1475,7 +1475,7 @@ index a8afbf93b48..d569b2fa017 100644
  		/* Release any resources held by EPQ mechanism before exiting */
  		EvalPlanQualEnd(&node->lr_epqstate);
 -		return NULL;
-+		return PostExecProcNodeInstr(pstate, NULL);
++		return ExecNodeRowcountEnd(pstate, NULL);
  	}
  
  	/* We don't need EvalPlanQual unless we get updated tuple version(s) */
@@ -1484,7 +1484,7 @@ index a8afbf93b48..d569b2fa017 100644
  
  	/* Got all locks, so return the current tuple */
 -	return slot;
-+	return PostExecProcNodeInstr(pstate, slot);
++	return ExecNodeRowcountEnd(pstate, slot);
  }
  
  /* ----------------------------------------------------------------
@@ -1505,7 +1505,7 @@ index 9798bb75365..d960833c341 100644
  			 */
  			if (!tuplestore_advance(tuplestorestate, forward))
 -				return NULL;	/* the tuplestore must be empty */
-+				return PostExecProcNodeInstr(pstate, NULL); /* the tuplestore must
++				return ExecNodeRowcountEnd(pstate, NULL); /* the tuplestore must
 +															 * be empty */
  		}
  		eof_tuplestore = false;
@@ -1515,7 +1515,7 @@ index 9798bb75365..d960833c341 100644
  	{
  		if (tuplestore_gettupleslot(tuplestorestate, forward, false, slot))
 -			return slot;
-+			return PostExecProcNodeInstr(pstate, slot);
++			return ExecNodeRowcountEnd(pstate, slot);
 +
  		if (forward)
  			eof_tuplestore = true;
@@ -1525,7 +1525,7 @@ index 9798bb75365..d960833c341 100644
  		{
  			node->eof_underlying = true;
 -			return NULL;
-+			return PostExecProcNodeInstr(pstate, NULL);
++			return ExecNodeRowcountEnd(pstate, NULL);
  		}
  
  		/*
@@ -1534,7 +1534,7 @@ index 9798bb75365..d960833c341 100644
  
  		ExecCopySlot(slot, outerslot);
 -		return slot;
-+		return PostExecProcNodeInstr(pstate, slot);
++		return ExecNodeRowcountEnd(pstate, slot);
  	}
  
  	/*
@@ -1542,7 +1542,7 @@ index 9798bb75365..d960833c341 100644
  	 */
 -	return ExecClearTuple(slot);
 +	result = ExecClearTuple(slot);
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -1555,13 +1555,13 @@ index d652663cb6a..d29ed16940b 100644
  											  slot, false);
  
 -						return slot;
-+						return PostExecProcNodeInstr(pstate, slot);
++						return ExecNodeRowcountEnd(pstate, slot);
  					}
  
  					/* The cache entry is void of any tuples. */
  					node->mstatus = MEMO_END_OF_SCAN;
 -					return NULL;
-+					return PostExecProcNodeInstr(pstate, NULL);
++					return ExecNodeRowcountEnd(pstate, NULL);
  				}
  
  				/* Handle cache miss */
@@ -1570,7 +1570,7 @@ index d652663cb6a..d29ed16940b 100644
  
  					node->mstatus = MEMO_END_OF_SCAN;
 -					return NULL;
-+					return PostExecProcNodeInstr(pstate, NULL);
++					return ExecNodeRowcountEnd(pstate, NULL);
  				}
  
  				node->entry = entry;
@@ -1579,7 +1579,7 @@ index d652663cb6a..d29ed16940b 100644
  				slot = node->ss.ps.ps_ResultTupleSlot;
  				ExecCopySlot(slot, outerslot);
 -				return slot;
-+				return PostExecProcNodeInstr(pstate, slot);
++				return ExecNodeRowcountEnd(pstate, slot);
  			}
  
  		case MEMO_CACHE_FETCH_NEXT_TUPLE:
@@ -1588,7 +1588,7 @@ index d652663cb6a..d29ed16940b 100644
  				{
  					node->mstatus = MEMO_END_OF_SCAN;
 -					return NULL;
-+					return PostExecProcNodeInstr(pstate, NULL);
++					return ExecNodeRowcountEnd(pstate, NULL);
  				}
  
  				slot = node->ss.ps.ps_ResultTupleSlot;
@@ -1596,7 +1596,7 @@ index d652663cb6a..d29ed16940b 100644
  									  false);
  
 -				return slot;
-+				return PostExecProcNodeInstr(pstate, slot);
++				return ExecNodeRowcountEnd(pstate, slot);
  			}
  
  		case MEMO_FILLING_CACHE:
@@ -1605,7 +1605,7 @@ index d652663cb6a..d29ed16940b 100644
  					entry->complete = true;
  					node->mstatus = MEMO_END_OF_SCAN;
 -					return NULL;
-+					return PostExecProcNodeInstr(pstate, NULL);
++					return ExecNodeRowcountEnd(pstate, NULL);
  				}
  
  				/*
@@ -1614,7 +1614,7 @@ index d652663cb6a..d29ed16940b 100644
  				slot = node->ss.ps.ps_ResultTupleSlot;
  				ExecCopySlot(slot, outerslot);
 -				return slot;
-+				return PostExecProcNodeInstr(pstate, slot);
++				return ExecNodeRowcountEnd(pstate, slot);
  			}
  
  		case MEMO_CACHE_BYPASS_MODE:
@@ -1623,13 +1623,13 @@ index d652663cb6a..d29ed16940b 100644
  				{
  					node->mstatus = MEMO_END_OF_SCAN;
 -					return NULL;
-+					return PostExecProcNodeInstr(pstate, NULL);
++					return ExecNodeRowcountEnd(pstate, NULL);
  				}
  
  				slot = node->ss.ps.ps_ResultTupleSlot;
  				ExecCopySlot(slot, outerslot);
 -				return slot;
-+				return PostExecProcNodeInstr(pstate, slot);
++				return ExecNodeRowcountEnd(pstate, slot);
  			}
  
  		case MEMO_END_OF_SCAN:
@@ -1638,14 +1638,14 @@ index d652663cb6a..d29ed16940b 100644
  			 * something calls us again by mistake.
  			 */
 -			return NULL;
-+			return PostExecProcNodeInstr(pstate, NULL);
++			return ExecNodeRowcountEnd(pstate, NULL);
  
  		default:
  			elog(ERROR, "unrecognized memoize state: %d",
  				 (int) node->mstatus);
 -			return NULL;
 +
-+			return PostExecProcNodeInstr(pstate, NULL);
++			return ExecNodeRowcountEnd(pstate, NULL);
  	}							/* switch */
  }
  
@@ -1660,7 +1660,7 @@ index 405e8f94285..0a9fb06d7c8 100644
 -			return ExecClearTuple(node->ps.ps_ResultTupleSlot);
 +		{
 +			result = ExecClearTuple(node->ps.ps_ResultTupleSlot);
-+			return PostExecProcNodeInstr(pstate, result);
++			return ExecNodeRowcountEnd(pstate, result);
 +		}
  
  		/*
@@ -1670,7 +1670,7 @@ index 405e8f94285..0a9fb06d7c8 100644
  	}
  
 -	return result;
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /*
@@ -1683,7 +1683,7 @@ index a233313128a..d757396c4c9 100644
  							result = MJFillOuter(node);
  							if (result)
 -								return result;
-+								return PostExecProcNodeInstr(pstate, result);
++								return ExecNodeRowcountEnd(pstate, result);
  						}
  						break;
  					case MJEVAL_ENDOFJOIN:
@@ -1692,7 +1692,7 @@ index a233313128a..d757396c4c9 100644
  						}
  						/* Otherwise we're done. */
 -						return NULL;
-+						return PostExecProcNodeInstr(pstate, NULL);
++						return ExecNodeRowcountEnd(pstate, NULL);
  				}
  				break;
  
@@ -1701,7 +1701,7 @@ index a233313128a..d757396c4c9 100644
  							result = MJFillInner(node);
  							if (result)
 -								return result;
-+								return PostExecProcNodeInstr(pstate, result);
++								return ExecNodeRowcountEnd(pstate, result);
  						}
  						break;
  					case MJEVAL_ENDOFJOIN:
@@ -1710,7 +1710,7 @@ index a233313128a..d757396c4c9 100644
  						}
  						/* Otherwise we're done. */
 -						return NULL;
-+						return PostExecProcNodeInstr(pstate, NULL);
++						return ExecNodeRowcountEnd(pstate, NULL);
  				}
  				break;
  
@@ -1728,7 +1728,7 @@ index a233313128a..d757396c4c9 100644
  
 -						return ExecProject(node->js.ps.ps_ProjInfo);
 +						result = ExecProject(node->js.ps.ps_ProjInfo);
-+						return PostExecProcNodeInstr(pstate, result);
++						return ExecNodeRowcountEnd(pstate, result);
  					}
  					else
  						InstrCountFiltered2(node, 1);
@@ -1737,7 +1737,7 @@ index a233313128a..d757396c4c9 100644
  					result = MJFillInner(node);
  					if (result)
 -						return result;
-+						return PostExecProcNodeInstr(pstate, result);
++						return ExecNodeRowcountEnd(pstate, result);
  				}
  
  				/*
@@ -1746,7 +1746,7 @@ index a233313128a..d757396c4c9 100644
  					result = MJFillOuter(node);
  					if (result)
 -						return result;
-+						return PostExecProcNodeInstr(pstate, result);
++						return ExecNodeRowcountEnd(pstate, result);
  				}
  
  				/*
@@ -1755,7 +1755,7 @@ index a233313128a..d757396c4c9 100644
  						}
  						/* Otherwise we're done. */
 -						return NULL;
-+						return PostExecProcNodeInstr(pstate, NULL);
++						return ExecNodeRowcountEnd(pstate, NULL);
  				}
  				break;
  
@@ -1764,7 +1764,7 @@ index a233313128a..d757396c4c9 100644
  							}
  							/* Otherwise we're done. */
 -							return NULL;
-+							return PostExecProcNodeInstr(pstate, NULL);
++							return ExecNodeRowcountEnd(pstate, NULL);
  					}
  				}
  				else			/* compareResult < 0 should not happen */
@@ -1773,7 +1773,7 @@ index a233313128a..d757396c4c9 100644
  					result = MJFillOuter(node);
  					if (result)
 -						return result;
-+						return PostExecProcNodeInstr(pstate, result);
++						return ExecNodeRowcountEnd(pstate, result);
  				}
  
  				/*
@@ -1782,7 +1782,7 @@ index a233313128a..d757396c4c9 100644
  						}
  						/* Otherwise we're done. */
 -						return NULL;
-+						return PostExecProcNodeInstr(pstate, NULL);
++						return ExecNodeRowcountEnd(pstate, NULL);
  				}
  				break;
  
@@ -1791,7 +1791,7 @@ index a233313128a..d757396c4c9 100644
  					result = MJFillInner(node);
  					if (result)
 -						return result;
-+						return PostExecProcNodeInstr(pstate, result);
++						return ExecNodeRowcountEnd(pstate, result);
  				}
  
  				/* Mark before advancing, if wanted */
@@ -1800,7 +1800,7 @@ index a233313128a..d757396c4c9 100644
  						}
  						/* Otherwise we're done. */
 -						return NULL;
-+						return PostExecProcNodeInstr(pstate, NULL);
++						return ExecNodeRowcountEnd(pstate, NULL);
  				}
  				break;
  
@@ -1809,7 +1809,7 @@ index a233313128a..d757396c4c9 100644
  					result = MJFillInner(node);
  					if (result)
 -						return result;
-+						return PostExecProcNodeInstr(pstate, result);
++						return ExecNodeRowcountEnd(pstate, result);
  				}
  
  				/* Mark before advancing, if wanted */
@@ -1818,7 +1818,7 @@ index a233313128a..d757396c4c9 100644
  				{
  					MJ_printf("ExecMergeJoin: end of inner subplan\n");
 -					return NULL;
-+					return PostExecProcNodeInstr(pstate, NULL);
++					return ExecNodeRowcountEnd(pstate, NULL);
  				}
  
  				/* Else remain in ENDOUTER state and process next tuple. */
@@ -1827,7 +1827,7 @@ index a233313128a..d757396c4c9 100644
  					result = MJFillOuter(node);
  					if (result)
 -						return result;
-+						return PostExecProcNodeInstr(pstate, result);
++						return ExecNodeRowcountEnd(pstate, result);
  				}
  
  				/*
@@ -1836,7 +1836,7 @@ index a233313128a..d757396c4c9 100644
  				{
  					MJ_printf("ExecMergeJoin: end of outer subplan\n");
 -					return NULL;
-+					return PostExecProcNodeInstr(pstate, NULL);
++					return ExecNodeRowcountEnd(pstate, NULL);
  				}
  
  				/* Else remain in ENDINNER state and process next tuple. */
@@ -1849,7 +1849,7 @@ index e44f1223886..1c2588f24b5 100644
  	 */
  	if (node->mt_done)
 -		return NULL;
-+		return PostExecProcNodeInstr(pstate, NULL);
++		return ExecNodeRowcountEnd(pstate, NULL);
  
  	/*
  	 * On first call, fire BEFORE STATEMENT triggers before proceeding.
@@ -1858,7 +1858,7 @@ index e44f1223886..1c2588f24b5 100644
  			 */
  			if (slot)
 -				return slot;
-+				return PostExecProcNodeInstr(pstate, slot);
++				return ExecNodeRowcountEnd(pstate, slot);
  
  			continue;			/* continue with the next tuple */
  		}
@@ -1867,7 +1867,7 @@ index e44f1223886..1c2588f24b5 100644
  					 */
  					if (slot)
 -						return slot;
-+						return PostExecProcNodeInstr(pstate, slot);
++						return ExecNodeRowcountEnd(pstate, slot);
  
  					continue;	/* continue with the next tuple */
  				}
@@ -1876,7 +1876,7 @@ index e44f1223886..1c2588f24b5 100644
  										NULL, NULL, context.planSlot);
  
 -			return slot;
-+			return PostExecProcNodeInstr(pstate, slot);
++			return ExecNodeRowcountEnd(pstate, slot);
  		}
  
  		EvalPlanQualSetSlot(&node->mt_epqstate, context.planSlot);
@@ -1885,7 +1885,7 @@ index e44f1223886..1c2588f24b5 100644
  						 */
  						if (slot)
 -							return slot;
-+							return PostExecProcNodeInstr(pstate, slot);
++							return ExecNodeRowcountEnd(pstate, slot);
  
  						continue;	/* continue with the next tuple */
  					}
@@ -1894,7 +1894,7 @@ index e44f1223886..1c2588f24b5 100644
  						 */
  						if (slot)
 -							return slot;
-+							return PostExecProcNodeInstr(pstate, slot);
++							return ExecNodeRowcountEnd(pstate, slot);
  
  						continue;	/* continue with the next tuple */
  					}
@@ -1903,7 +1903,7 @@ index e44f1223886..1c2588f24b5 100644
  		 */
  		if (slot)
 -			return slot;
-+			return PostExecProcNodeInstr(pstate, slot);
++			return ExecNodeRowcountEnd(pstate, slot);
  	}
  
  	/*
@@ -1912,7 +1912,7 @@ index e44f1223886..1c2588f24b5 100644
  	node->mt_done = true;
  
 -	return NULL;
-+	return PostExecProcNodeInstr(pstate, NULL);
++	return ExecNodeRowcountEnd(pstate, NULL);
  }
  
  /*
@@ -1934,7 +1934,7 @@ index 047788d9e4e..70e945eeee5 100644
 +					  (ExecScanAccessMtd) NamedTuplestoreScanNext,
 +					  (ExecScanRecheckMtd) NamedTuplestoreScanRecheck);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  
@@ -1955,7 +1955,7 @@ index 5cd1a251625..da8a94b4c85 100644
  			{
  				ENL1_printf("no outer tuple, ending join");
 -				return NULL;
-+				return PostExecProcNodeInstr(pstate, NULL);
++				return ExecNodeRowcountEnd(pstate, NULL);
  			}
  
  			ENL1_printf("saving new outer tuple information");
@@ -1965,7 +1965,7 @@ index 5cd1a251625..da8a94b4c85 100644
  
 -					return ExecProject(node->js.ps.ps_ProjInfo);
 +					result = ExecProject(node->js.ps.ps_ProjInfo);
-+					return PostExecProcNodeInstr(pstate, result);
++					return ExecNodeRowcountEnd(pstate, result);
  				}
  				else
  					InstrCountFiltered2(node, 1);
@@ -1975,7 +1975,7 @@ index 5cd1a251625..da8a94b4c85 100644
  
 -				return ExecProject(node->js.ps.ps_ProjInfo);
 +				result = ExecProject(node->js.ps.ps_ProjInfo);
-+				return PostExecProcNodeInstr(pstate, result);
++				return ExecNodeRowcountEnd(pstate, result);
  			}
  			else
  				InstrCountFiltered2(node, 1);
@@ -1988,7 +1988,7 @@ index 880f39fb2ff..3d2fd3569ec 100644
  
  		if (resultSlot != NULL)
 -			return resultSlot;
-+			return PostExecProcNodeInstr(pstate, resultSlot);
++			return ExecNodeRowcountEnd(pstate, resultSlot);
  	}
  
  	/*
@@ -1997,7 +1997,7 @@ index 880f39fb2ff..3d2fd3569ec 100644
  
  		if (TupIsNull(outerTupleSlot))
 -			return NULL;
-+			return PostExecProcNodeInstr(pstate, NULL);
++			return ExecNodeRowcountEnd(pstate, NULL);
  
  		/*
  		 * Prepare to compute projection expressions, which will expect to
@@ -2006,7 +2006,7 @@ index 880f39fb2ff..3d2fd3569ec 100644
  		 */
  		if (resultSlot)
 -			return resultSlot;
-+			return PostExecProcNodeInstr(pstate, resultSlot);
++			return ExecNodeRowcountEnd(pstate, resultSlot);
  
  		/*
  		 * When we do loop back, we'd better reset the econtext again, just in
@@ -2015,7 +2015,7 @@ index 880f39fb2ff..3d2fd3569ec 100644
  	}
  
 -	return NULL;
-+	return PostExecProcNodeInstr(pstate, NULL);
++	return ExecNodeRowcountEnd(pstate, NULL);
  }
  
  /* ----------------------------------------------------------------
@@ -2028,7 +2028,7 @@ index cd0ad51dcd2..fc67d15a0ec 100644
  			tuplestore_puttupleslot(node->working_table, slot);
  			/* ... and to the caller */
 -			return slot;
-+			return PostExecProcNodeInstr(pstate, slot);
++			return ExecNodeRowcountEnd(pstate, slot);
  		}
  		node->recursing = true;
  	}
@@ -2037,11 +2037,11 @@ index cd0ad51dcd2..fc67d15a0ec 100644
  		tuplestore_puttupleslot(node->intermediate_table, slot);
  		/* ... and return it */
 -		return slot;
-+		return PostExecProcNodeInstr(pstate, slot);
++		return ExecNodeRowcountEnd(pstate, slot);
  	}
  
 -	return NULL;
-+	return PostExecProcNodeInstr(pstate, NULL);
++	return ExecNodeRowcountEnd(pstate, NULL);
  }
  
  /* ----------------------------------------------------------------
@@ -2062,7 +2062,7 @@ index 06842a48eca..2d69bbad828 100644
  		{
  			node->rs_done = true;
 -			return NULL;
-+			return PostExecProcNodeInstr(pstate, NULL);
++			return ExecNodeRowcountEnd(pstate, NULL);
  		}
  	}
  
@@ -2071,7 +2071,7 @@ index 06842a48eca..2d69bbad828 100644
  
  			if (TupIsNull(outerTupleSlot))
 -				return NULL;
-+				return PostExecProcNodeInstr(pstate, NULL);
++				return ExecNodeRowcountEnd(pstate, NULL);
  
  			/*
  			 * prepare to compute projection expressions, which will expect to
@@ -2081,12 +2081,12 @@ index 06842a48eca..2d69bbad828 100644
  		/* form the result tuple using ExecProject(), and return it */
 -		return ExecProject(node->ps.ps_ProjInfo);
 +		result = ExecProject(node->ps.ps_ProjInfo);
-+		return PostExecProcNodeInstr(pstate, result);
++		return ExecNodeRowcountEnd(pstate, result);
 +
  	}
  
 -	return NULL;
-+	return PostExecProcNodeInstr(pstate, NULL);
++	return ExecNodeRowcountEnd(pstate, NULL);
  }
  
  /* ----------------------------------------------------------------
@@ -2108,7 +2108,7 @@ index 6b3db7548ed..6a1b0994dc0 100644
 +					  (ExecScanAccessMtd) SampleNext,
 +					  (ExecScanRecheckMtd) SampleRecheck);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -2140,7 +2140,7 @@ index 94047d29430..ae25a61ee40 100644
 +							  NULL,
 +							  NULL);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /*
@@ -2169,7 +2169,7 @@ index 94047d29430..ae25a61ee40 100644
 +							  pstate->qual,
 +							  NULL);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /*
@@ -2197,7 +2197,7 @@ index 94047d29430..ae25a61ee40 100644
 +							  NULL,
 +							  pstate->ps_ProjInfo);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /*
@@ -2225,7 +2225,7 @@ index 94047d29430..ae25a61ee40 100644
 +							  pstate->qual,
 +							  pstate->ps_ProjInfo);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /*
@@ -2243,7 +2243,7 @@ index 94047d29430..ae25a61ee40 100644
 +					  (ExecScanAccessMtd) SeqNext,
 +					  (ExecScanRecheckMtd) SeqRecheck);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -2264,13 +2264,13 @@ index 9e0f9274fb1..51d3fa38d5f 100644
  	{
  		node->numOutput--;
 -		return resultTupleSlot;
-+		return PostExecProcNodeInstr(pstate, resultTupleSlot);
++		return ExecNodeRowcountEnd(pstate, resultTupleSlot);
  	}
  
  	/* Otherwise, we're done if we are out of groups */
  	if (node->setop_done)
 -		return NULL;
-+		return PostExecProcNodeInstr(pstate, NULL);
++		return ExecNodeRowcountEnd(pstate, NULL);
  
  	/* Fetch the next tuple group according to the correct strategy */
  	if (plannode->strategy == SETOP_HASHED)
@@ -2280,13 +2280,13 @@ index 9e0f9274fb1..51d3fa38d5f 100644
 -		return setop_retrieve_hash_table(node);
 +
 +		result = setop_retrieve_hash_table(node);
-+		return PostExecProcNodeInstr(pstate, result);
++		return ExecNodeRowcountEnd(pstate, result);
  	}
  	else
 -		return setop_retrieve_sorted(node);
 +	{
 +		result = setop_retrieve_sorted(node);
-+		return PostExecProcNodeInstr(pstate, result);
++		return ExecNodeRowcountEnd(pstate, result);
 +	}
  }
  
@@ -2300,7 +2300,7 @@ index f603337ecd3..ad89b11f46f 100644
  									  false, slot, NULL);
  
 -	return slot;
-+	return PostExecProcNodeInstr(pstate, slot);
++	return ExecNodeRowcountEnd(pstate, slot);
  }
  
  /* ----------------------------------------------------------------
@@ -2322,7 +2322,7 @@ index 8dd1ae46308..c7d6a0f9078 100644
 +					  (ExecScanAccessMtd) SubqueryNext,
 +					  (ExecScanRecheckMtd) SubqueryRecheck);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -2344,7 +2344,7 @@ index 4bae685d45a..16cd0390723 100644
 +					  (ExecScanAccessMtd) TableFuncNext,
 +					  (ExecScanRecheckMtd) TableFuncRecheck);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -2366,7 +2366,7 @@ index 6fd9f68cddd..ba4f4f3ee1b 100644
 +					  (ExecScanAccessMtd) TidRangeNext,
 +					  (ExecScanRecheckMtd) TidRangeRecheck);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -2388,7 +2388,7 @@ index d50c6600358..969b5f3d598 100644
 +					  (ExecScanAccessMtd) TidNext,
 +					  (ExecScanRecheckMtd) TidRecheck);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -2409,7 +2409,7 @@ index 3854ad285c4..72b01925df2 100644
  			/* end of subplan, so we're done */
  			ExecClearTuple(resultTupleSlot);
 -			return NULL;
-+			return PostExecProcNodeInstr(pstate, NULL);
++			return ExecNodeRowcountEnd(pstate, NULL);
  		}
  
  		/*
@@ -2419,7 +2419,7 @@ index 3854ad285c4..72b01925df2 100644
  	 */
 -	return ExecCopySlot(resultTupleSlot, slot);
 +	result = ExecCopySlot(resultTupleSlot, slot);
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -2441,7 +2441,7 @@ index 8e85a5f2e9a..950776feab4 100644
 +					  (ExecScanAccessMtd) ValuesNext,
 +					  (ExecScanRecheckMtd) ValuesRecheck);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  /* ----------------------------------------------------------------
@@ -2454,7 +2454,7 @@ index 3a0d1f0c922..43fbddd7d02 100644
  
  	if (winstate->status == WINDOWAGG_DONE)
 -		return NULL;
-+		return PostExecProcNodeInstr(pstate, NULL);
++		return ExecNodeRowcountEnd(pstate, NULL);
  
  	/*
  	 * Compute frame offset values, if any, during first call (or after a
@@ -2463,7 +2463,7 @@ index 3a0d1f0c922..43fbddd7d02 100644
  				/* No further partitions?  We're done */
  				winstate->status = WINDOWAGG_DONE;
 -				return NULL;
-+				return PostExecProcNodeInstr(pstate, NULL);
++				return ExecNodeRowcountEnd(pstate, NULL);
  			}
  		}
  
@@ -2472,7 +2472,7 @@ index 3a0d1f0c922..43fbddd7d02 100644
  					 */
  					winstate->status = WINDOWAGG_DONE;
 -					return NULL;
-+					return PostExecProcNodeInstr(pstate, NULL);
++					return ExecNodeRowcountEnd(pstate, NULL);
  				}
  			}
  
@@ -2481,7 +2481,7 @@ index 3a0d1f0c922..43fbddd7d02 100644
  	}
  
 -	return slot;
-+	return PostExecProcNodeInstr(pstate, slot);
++	return ExecNodeRowcountEnd(pstate, slot);
  }
  
  /* -----------------
@@ -2508,7 +2508,7 @@ index f6379c35d2f..1b4afc6d05f 100644
 +					  (ExecScanAccessMtd) WorkTableScanNext,
 +					  (ExecScanRecheckMtd) WorkTableScanRecheck);
 +
-+	return PostExecProcNodeInstr(pstate, result);
++	return ExecNodeRowcountEnd(pstate, result);
  }
  
  
@@ -2541,7 +2541,7 @@ index fa2b657fb2f..25377377a7d 100644
  #endif
  
 +/* ----------------------------------------------------------------
-+ *		PostExecProcNodeInstr
++ *		ExecNodeRowcountEnd
 + *
 + * This is embedded in all ExecXXX functions, such as ExecAgg, ExecAppend,
 + * and so on, and is called before returning their result.
@@ -2550,7 +2550,7 @@ index fa2b657fb2f..25377377a7d 100644
 + */
 +#ifndef FRONTEND
 +static pg_attribute_always_inline TupleTableSlot *
-+PostExecProcNodeInstr(PlanState *node, TupleTableSlot *result)
++ExecNodeRowcountEnd(PlanState *node, TupleTableSlot *result)
 +{
 +	uint64_t	current = node->hot_instr;
 +

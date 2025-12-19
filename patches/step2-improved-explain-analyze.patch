@@ -6,7 +6,7 @@ index f5f9cfbeead..0b8e2753847 100644
  
  static TupleTableSlot *ExecProcNodeFirst(PlanState *node);
  static TupleTableSlot *ExecProcNodeInstr(PlanState *node);
-+static TupleTableSlot *ExecProcNodeInstrLite(PlanState *node);
++static TupleTableSlot *ExecProcNodeInstrRowCount(PlanState *node);
  static bool ExecShutdownNode_walker(PlanState *node, void *context);
  
  
@@ -17,7 +17,7 @@ index f5f9cfbeead..0b8e2753847 100644
 -		node->ExecProcNode = ExecProcNodeInstr;
 +	{
 +		/*--
-+		 * Use ExecProcNodeInstrLite() to avoid calling InstrStartNode()
++		 * Use ExecProcNodeInstrRowCount() to avoid calling InstrStartNode()
 +		 * and InstrStopNode() when the following conditions are not required:
 +		 * - need_timer
 +		 * - need_bufusage
@@ -27,7 +27,7 @@ index f5f9cfbeead..0b8e2753847 100644
 +			|| node->instrument->need_walusage)
 +			node->ExecProcNode = ExecProcNodeInstr;
 +		else
-+			node->ExecProcNode = ExecProcNodeInstrLite;
++			node->ExecProcNode = ExecProcNodeInstrRowCount;
 +	}
  	else
  		node->ExecProcNode = node->ExecProcNodeReal;
@@ -45,7 +45,7 @@ index f5f9cfbeead..0b8e2753847 100644
 + * - need_walusage
 + */
 +static TupleTableSlot *
-+ExecProcNodeInstrLite(PlanState *node)
++ExecProcNodeInstrRowCount(PlanState *node)
 +{
 +	TupleTableSlot *result;
 +
